@@ -1,46 +1,50 @@
-# VCert — Multi-Node Shared Certificate Convergence (`pickupFirst`)
+# VCert: `pickupFirst` Extension (GitHub Issue #649)
 
-> **Automated, idempotent certificate and private key distribution across server clusters for Venafi TPP & CyberArk Certificate Manager SaaS (NGTS).**
+> **A delta extension to Venafi VCert enabling automated, idempotent certificate and private key convergence across multi-node server clusters.**
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Issue](https://img.shields.io/badge/GitHub%20Issue-%23649-orange.svg)](https://github.com/Venafi/vcert/issues/649)
-[![Platforms](https://img.shields.io/badge/Platforms-Linux%20%7C%20macOS%20%7C%20Windows-brightgreen.svg)](#building-from-source)
-[![Upstream](https://img.shields.io/badge/Upstream-Venafi%2Fvcert-blue)](https://github.com/Venafi/vcert)
-
----
-
-### Reference to Upstream VCert
-
-This repository is an enhanced distribution of the official [**Venafi VCert** (`Venafi/vcert`)](https://github.com/Venafi/vcert).
-
-It implements the feature requested in [**GitHub Issue #649**](https://github.com/Venafi/vcert/issues/649): the **`pickupFirst`** playbook engine, with end-to-end support for both **Venafi Trust Protection Platform (TPP)** and **CyberArk Certificate Manager SaaS / Venafi Next-Gen Trust Security (NGTS)**.
-
-* **Upstream Repository**: [github.com/Venafi/vcert](https://github.com/Venafi/vcert)
-* **Official Documentation**: [Venafi Documentation](https://docs.venafi.com) | [CyberArk Certificate Manager Documentation](https://docs.cyberark.com)
-* **Status**: Fully backward-compatible drop-in replacement with enhanced multi-node playbook coordination.
+[![Upstream VCert](https://img.shields.io/badge/Upstream-Venafi%2Fvcert-blue.svg)](https://github.com/Venafi/vcert)
+[![GitHub Issue](https://img.shields.io/badge/GitHub%20Issue-%23649-orange.svg)](https://github.com/Venafi/vcert/issues/649)
+[![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
+[![Platforms](https://img.shields.io/badge/Platforms-Linux%20%7C%20macOS%20%7C%20Windows-blue.svg)](#building-from-source)
 
 ---
 
-## The Problem: Clustered Certificate Distribution
+## 🔗 Upstream Reference
 
-In clustered or load-balanced topologies (e.g. Node 1 and Node 2 serving the same hostname or wildcard), multiple servers require the exact same certificate and private key:
+This repository is an **extension fork of the official [Venafi VCert (`Venafi/vcert`)](https://github.com/Venafi/vcert)** project.
 
-* **Traditional Playbook Behavior**: Every node independently executes certificate enrollment. This creates duplicate certificates, wastes CA quotas and budget, and leaves nodes with mismatched private keys.
-* **Complex Workarounds**: Teams historically built bespoke rsync scripts, shared NFS mounts, SSH copy routines, or maintained separate "Leader" vs "Follower" playbooks.
+* **Upstream Project**: [https://github.com/Venafi/vcert](https://github.com/Venafi/vcert)
+* **Official Documentation**: [Venafi Documentation](https://docs.venafi.com) | [CyberArk Certificate Manager](https://docs.cyberark.com)
+* **Scope of this Repository**: This repository focuses specifically on the **delta changes** required to resolve [**GitHub Issue #649**](https://github.com/Venafi/vcert/issues/649) (`pickupFirst` mode for Playbooks), supporting both **Venafi TPP** (Self-Hosted) and **CyberArk Certificate Manager SaaS (NGTS)**.
+
+For standard VCert CLI options, PKI setup, and general architecture, please consult the upstream [Venafi/vcert](https://github.com/Venafi/vcert) repository.
 
 ---
 
-## The Solution: `pickupFirst: true`
+## 🎯 The Delta: What Does `pickupFirst` Add?
 
+### The Problem
+When running automated certificate playbooks in multi-node clusters (load-balanced web servers, API clusters, ingress proxies):
+- Every node historically attempted independent enrollment.
+- This resulted in **duplicate certificate issuances**, wasted CA quotas/costs, and out-of-sync private keys across nodes.
+- Teams had to create brittle external synchronization scripts (rsync, SSH, shared NFS) or maintain separate "leader" vs "follower" playbooks.
+
+### The Solution
 With `pickupFirst: true`, **all nodes run the exact same command with the exact same playbook**:
 
 ```bash
 vcert run -f playbook.yaml
 ```
 
-No custom wrapper scripts. No separate leader/follower configurations. Zero coordination infrastructure required.
+* **No custom wrapper scripts.**
+* **No separate leader/follower playbooks.**
+* **Zero coordination infrastructure needed.**
 
-### Identical Playbook Configuration
+---
+
+## 📋 Playbook Configuration
+
+Simply add `pickupFirst: true` under `request:` in your certificate task:
 
 ```yaml
 certificateTasks:
@@ -49,7 +53,7 @@ certificateTasks:
     request:
       csr: service
       pickupFirst: true            # <-- Enables automatic multi-node convergence
-      zone: 'Private 5 days'
+      zone: 'Private 5 days'       # TPP Zone or NGTS Application/Issuing Template
       subject:
         commonName: 'shared.example.com'
     installations:
@@ -62,7 +66,7 @@ certificateTasks:
 
 ---
 
-## How the Nodes Coordinate Automatically
+## 🔄 How the Nodes Coordinate Automatically
 
 ```
                    vcert run -f playbook.yaml
@@ -83,84 +87,81 @@ certificateTasks:
  - ZERO enrollment
 ```
 
-### Execution Lifecycle
+### Coordination Lifecycle
 
 1. **Whichever node runs first (e.g. Node 1 - The Pioneer)**:
-   * Queries the platform for `shared.example.com`.
-   * Finds nothing &rarr; automatically falls through to enroll it.
-   * The platform generates the private key (`csr: service`) and issues the certificate.
-   * Node 1 installs the certificate, private key, and chain locally, then executes `afterInstallAction`.
+   - Queries the platform for `shared.example.com`.
+   - Finds nothing &rarr; automatically falls through to enroll it.
+   - The platform generates the private key (`csr: service`) and issues the certificate.
+   - Node 1 installs the certificate, private key, and chain locally, then runs `afterInstallAction`.
 
 2. **The other node (Node 2 - The Follower)**:
-   * Runs the **identical command**: `vcert run -f playbook.yaml`.
-   * Queries the platform for `shared.example.com`.
-   * Finds the certificate already enrolled by Node 1.
-   * Since Node 2 has no certificate installed yet, it downloads the certificate and the vaulted private key (via secure DEK decryption) and installs them.
-   * **Zero duplicate enrollment requests are created.**
+   - Runs the **identical command**: `vcert run -f playbook.yaml`.
+   - Queries the platform for `shared.example.com`.
+   - Finds the certificate already enrolled by Node 1.
+   - Since Node 2 has no certificate installed yet, it downloads the certificate and the server-side private key (via secure DEK decryption on NGTS, or WebSDK on TPP) and installs them.
+   - **Zero duplicate enrollment requests are created.**
 
-3. **Subsequent runs on all nodes (e.g. automated daily cron)**:
-   * Both nodes run `vcert run -f playbook.yaml`.
-   * Both inspect their local certificate: the SHA-1 thumbprint matches the platform certificate.
-   * Both evaluate the `renewBefore` window. If the certificate is healthy, both exit in **< 1 second** with *"certificate in good health. No actions needed"*.
-   * When the renewal window eventually arrives, whichever node executes first renews the certificate. The remaining nodes automatically pick up the new certificate and private key on their next run.
+3. **Subsequent runs on all nodes (e.g. daily cron)**:
+   - Both nodes run `vcert run -f playbook.yaml`.
+   - Both inspect their local certificate: the SHA-1 thumbprint matches the platform certificate.
+   - Both check `renewBefore`: if still valid, both exit in **< 1 second** with *"certificate in good health. No actions needed"*.
+   - When the renewal window hits, whichever node executes first renews the certificate. The other node automatically picks up the renewed certificate and private key on its next run.
 
 ---
 
-## Decision Engine Matrix
+## ⚖️ The 4-Way Decision Matrix
 
-Before triggering any certificate request, VCert evaluates a 4-way decision matrix:
+Before triggering any enrollment, the `pickupFirst` engine evaluates:
 
-| State | Condition | VCert Action |
+| State | Condition | Engine Action |
 |---|---|---|
-| **Match** | Local thumbprint == Platform thumbprint | Defer to `renewBefore` window check. Exit in <1s if healthy. |
-| **Platform Newer** | Platform NotAfter > Local NotAfter (or no local cert) | Download certificate + private key + chain, install, trigger `afterInstallAction`. Skip enrollment. |
-| **Platform Older** | Platform NotAfter < Local NotAfter | Refuse downgrade with a warning log. Exit cleanly. |
-| **Not Found** | No certificate matching Common Name or `pickupId` | Fall through to standard certificate enrollment. |
+| **Match** | Local thumbprint == Platform thumbprint | Skips download; defers to `renewBefore` check. Exits in < 1s if valid. |
+| **Platform Newer** | Platform NotAfter > Local NotAfter (or no local cert) | Downloads certificate + private key + chain, installs, runs `afterInstallAction`. Skips enrollment. |
+| **Platform Older** | Platform NotAfter < Local NotAfter | Refuses downgrade with a warning log. Exits cleanly without modifying local files. |
+| **Not Found** | No matching cert on platform | Falls through to standard certificate enrollment. |
 
 ---
 
-## Quickstart & Verification
+## 🔍 Code Delta Summary (What Changed)
 
-### Using Pre-built Windows Binary
-A pre-compiled 64-bit Windows binary is included in the release:
+The following table summarizes the files added or modified to implement this feature:
 
+| File | Status | Description |
+|---|:---:|---|
+| [`pkg/playbook/app/service/pickup_first.go`](pkg/playbook/app/service/pickup_first.go) | **NEW** | Core 4-way decision matrix (`Match`, `PlatformNewer`, `PlatformOlder`, `NotFound`) and state handler. |
+| [`pkg/playbook/app/service/service.go`](pkg/playbook/app/service/service.go) | Modified | Hooked `pickupFirstAttempt` into playbook `Execute()` before enrollment checks. |
+| [`pkg/playbook/app/domain/playbookRequest.go`](pkg/playbook/app/domain/playbookRequest.go) | Modified | Added `PickupFirst bool` and `PickupID string` fields to `PlaybookRequestCertificate`. |
+| [`pkg/playbook/app/installer/crypto.go`](pkg/playbook/app/installer/crypto.go) | Modified | Added `LoadInstalledPEM` to inspect locally installed certificates for SHA-1 fingerprint & expiration. |
+| [`pkg/playbook/app/vcertutil/vcertutil.go`](pkg/playbook/app/vcertutil/vcertutil.go) | Modified | Added `LocateLatestCN` (multi-platform discovery for TPP and NGTS) and `PickupCertificateByLocator`. |
+| [`pkg/venafi/ngts/connector.go`](pkg/venafi/ngts/connector.go) | Modified | Added `SearchCertificatesByCN`, `SearchCertificatesByFingerprint`, and `GetCertificateDetails`. |
+| [`pkg/venafi/ngts/search.go`](pkg/venafi/ngts/search.go) | Modified | Added `CertificateStatus` field to NGTS `Certificate` model. |
+| [`pkg/playbook/app/service/pickup_first_test.go`](pkg/playbook/app/service/pickup_first_test.go) | **NEW** | Unit test suite verifying all 4 decision matrix paths and edge cases. |
+| [`pkg/playbook/app/vcertutil/vcertutil_test.go`](pkg/playbook/app/vcertutil/vcertutil_test.go) | **NEW** | Unit test suite for locator helpers. |
+| [`pickup_first_guide.html`](pickup_first_guide.html) | **NEW** | Standalone visual documentation guide (Light theme). |
+
+---
+
+## 🚀 Building & Running
+
+### Pre-built Binary (Windows x64)
+The root directory includes a pre-compiled Windows executable:
 ```powershell
 .\vcert.exe --version
 # Output: vcert.exe version v5.13.9-pickupFirst
-
-.\vcert.exe run -f ./playbook.yaml
 ```
 
-### Building from Source
+### Compiling from Source for Other Platforms (Go 1.21+)
 
-You can compile VCert for any operating platform (Linux, macOS, Windows) using Go 1.21+:
-
-#### Linux (x86_64 / amd64)
+#### Linux (`amd64` / `arm64`)
 ```bash
 GOOS=linux GOARCH=amd64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.9-pickupFirst -s -w" -o vcert ./cmd/vcert
 chmod +x vcert
-./vcert --version
 ```
 
-#### Linux (ARM64)
-```bash
-GOOS=linux GOARCH=arm64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.9-pickupFirst -s -w" -o vcert ./cmd/vcert
-```
-
-#### macOS (Apple Silicon / arm64)
+#### macOS (`arm64` / `amd64`)
 ```bash
 GOOS=darwin GOARCH=arm64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.9-pickupFirst -s -w" -o vcert ./cmd/vcert
-```
-
-#### macOS (Intel / amd64)
-```bash
-GOOS=darwin GOARCH=amd64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.9-pickupFirst -s -w" -o vcert ./cmd/vcert
-```
-
-#### Windows (amd64)
-```powershell
-$env:GOOS="windows"; $env:GOARCH="amd64"
-go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.9-pickupFirst -s -w" -o vcert.exe ./cmd/vcert
 ```
 
 ### Running Unit Tests
@@ -171,27 +172,12 @@ go test -v ./pkg/playbook/app/vcertutil -run Test
 
 ---
 
-## Platform Support
-
-| Platform | Supported | Private Key Retrieval | Discovery Method |
-|---|:---:|---|---|
-| **Venafi TPP** (Self-Hosted) | Yes | Vaulted key via TPP WebSDK (`/vedsdk/Certificates/Retrieve`) | DN search: `<zone>\<commonName>` or custom `pickupId` |
-| **CyberArk Certificate Manager SaaS (NGTS)** | Yes | Data Encryption Key (DEK) decryption via `/v1/certificates/{id}/privatekey` | CN search: `/v1/certificates?filter=subjectCN:eq:...` or fingerprint |
-
----
-
-## Documentation & Guides
-
-* **Interactive Guide**: Open [`pickup_first_guide.html`](pickup_first_guide.html) in your browser for a visual topology walkthrough.
-* **Playbook Reference**: See [`README-PLAYBOOK.md`](README-PLAYBOOK.md) for full configuration specifications.
-* **Distribution Guide**: See [`README-DISTRIBUTION.md`](README-DISTRIBUTION.md) for architecture details.
-* **Platform CLIs**:
-  * [CyberArk Certificate Manager, SaaS (NGTS)](README-CLI-NGTS.md)
-  * [CyberArk Certificate Manager, Self-Hosted (TPP)](README-CLI-PLATFORM.md)
-  * [CyberArk Workload Identity Manager (Firefly)](README-CLI-FIREFLY.md)
+## 📚 Additional Resources
+* **Visual Interactive Guide**: Open [`pickup_first_guide.html`](pickup_first_guide.html) in any browser.
+* **Full Playbook Reference**: [`README-PLAYBOOK.md`](README-PLAYBOOK.md)
+* **Upstream VCert Project**: [github.com/Venafi/vcert](https://github.com/Venafi/vcert)
 
 ---
 
 ## License
-
-This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details.
+Apache 2.0 License - see the [LICENSE](LICENSE) file.
