@@ -1,211 +1,197 @@
-[![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-![Community Supported](https://img.shields.io/badge/Support%20Level-Community-brightgreen)
-![Compatible with Certificate Manager, Self-hosted 17.3+ & Certificate Manager, SaaS & Workload Identity Manager](https://img.shields.io/badge/Compatibility-Certificate%20Manager%2C%20Self--Hosted_17.3%2B_%26_Certificate%20Manager%2C%20SaaS_%26_Workload%20Identity%20Manager-f9a90c)  
-_**This open source project is community-supported.** To report a problem or share an idea, use
-**[Issues](../../issues)**; and if you have a suggestion for fixing the issue, please include those details, too.
-In addition, use **[Pull Requests](../../pulls)** to contribute actual bug fixes or proposed enhancements.
-We welcome and appreciate all contributions. Got questions or want to discuss something with our team?
-**[Join us on Slack](https://join.slack.com/t/venafi-integrations/shared_invite/zt-i8fwc379-kDJlmzU8OiIQOJFSwiA~dg)**!_
+# VCert — Multi-Node Shared Certificate Convergence (`pickupFirst`)
 
-# VCert
+> **Automated, idempotent certificate and private key distribution across server clusters for Venafi TPP & CyberArk Certificate Manager SaaS (NGTS).**
 
-[![GoDoc](https://godoc.org/github.com/Venafi/vcert?status.svg)](https://pkg.go.dev/github.com/Venafi/vcert)
-[![Go Report Card](https://goreportcard.com/badge/github.com/Venafi/vcert)](https://goreportcard.com/report/github.com/Venafi/vcert)
-[![Used By](https://sourcegraph.com/github.com/Venafi/vcert/-/badge.svg)](https://sourcegraph.com/github.com/Venafi/vcert?badge)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Issue](https://img.shields.io/badge/GitHub%20Issue-%23649-orange.svg)](https://github.com/Venafi/vcert/issues/649)
+[![Platforms](https://img.shields.io/badge/Platforms-Linux%20%7C%20macOS%20%7C%20Windows-brightgreen.svg)](#building-from-source)
+[![Upstream](https://img.shields.io/badge/Upstream-Venafi%2Fvcert-blue)](https://github.com/Venafi/vcert)
 
-VCert is a Go library, SDK, and command line utility designed to simplify key generation and enrollment of machine identities
-(also known as SSL/TLS certificates and keys) that comply with enterprise security policy by using the
-[CyberArk Certificate Manager, Self-Hosted](https://www.cyberark.com/products/certificate-manager/) 
-or [CyberArk Certificate Manager, SaaS](https://www.cyberark.com/products/certificate-manager/) or [CyberArk Workload Identity Manager](https://www.cyberark.com/products/workload-identity-manager/).
+---
 
-See [VCert CLI for CyberArk Certificate Manager, Self-Hosted](README-CLI-PLATFORM.md),
-[VCert CLI for CyberArk Certificate Manager, SaaS](README-CLI-CLOUD.md), [VCert CLI for CyberArk Workload Identity Manager](README-CLI-FIREFLY.md), or
-[VCert Playbook & Multi-Node `pickupFirst` Guide](README-PLAYBOOK.md) to get started with the command line utility and playbook orchestration.
+### Reference to Upstream VCert
 
-### Multi-Node Clustered Convergence (`pickupFirst: true`)
+This repository is an enhanced distribution of the official [**Venafi VCert** (`Venafi/vcert`)](https://github.com/Venafi/vcert).
 
-With `pickupFirst: true` enabled in a playbook, all cluster nodes (e.g. Node 1 and Node 2 behind a load balancer) execute the exact same command:
+It implements the feature requested in [**GitHub Issue #649**](https://github.com/Venafi/vcert/issues/649): the **`pickupFirst`** playbook engine, with end-to-end support for both **Venafi Trust Protection Platform (TPP)** and **CyberArk Certificate Manager SaaS / Venafi Next-Gen Trust Security (NGTS)**.
+
+* **Upstream Repository**: [github.com/Venafi/vcert](https://github.com/Venafi/vcert)
+* **Official Documentation**: [Venafi Documentation](https://docs.venafi.com) | [CyberArk Certificate Manager Documentation](https://docs.cyberark.com)
+* **Status**: Fully backward-compatible drop-in replacement with enhanced multi-node playbook coordination.
+
+---
+
+## The Problem: Clustered Certificate Distribution
+
+In clustered or load-balanced topologies (e.g. Node 1 and Node 2 serving the same hostname or wildcard), multiple servers require the exact same certificate and private key:
+
+* **Traditional Playbook Behavior**: Every node independently executes certificate enrollment. This creates duplicate certificates, wastes CA quotas and budget, and leaves nodes with mismatched private keys.
+* **Complex Workarounds**: Teams historically built bespoke rsync scripts, shared NFS mounts, SSH copy routines, or maintained separate "Leader" vs "Follower" playbooks.
+
+---
+
+## The Solution: `pickupFirst: true`
+
+With `pickupFirst: true`, **all nodes run the exact same command with the exact same playbook**:
+
 ```bash
 vcert run -f playbook.yaml
 ```
-- **Node 1 (First to run)**: Automatically enrolls the certificate and vaults the private key centrally.
-- **Node 2 (Follower)**: Automatically discovers the issued certificate and downloads both the certificate and private key without creating duplicate enrollments.
-- **Subsequent Runs**: Both nodes verify the local certificate thumbprint against the platform and exit in <1s when healthy.
 
-For full architectural diagrams and walkthroughs, see [README-PLAYBOOK.md](README-PLAYBOOK.md), [README-DISTRIBUTION.md](README-DISTRIBUTION.md), and [pickup_first_guide.html](pickup_first_guide.html).
+No custom wrapper scripts. No separate leader/follower configurations. Zero coordination infrastructure required.
 
-#### Compatibility
+### Identical Playbook Configuration
 
-VCert releases are tested using the latest version of CyberArk Certificate Manager, Self-Hosted. General functionality of the
-[latest VCert release](../../releases/latest) should be compatible with CyberArk Certificate Manager, Self-Hosted 17.3 or higher.
-Custom Fields and Instance Tracking require CyberArk Certificate Manager, Self-Hosted 18.2 or higher, and Token Authentication requires CyberArk Certificate Manager, Self-Hosted 20.1 or higher.
-
-## Developer Setup
-
-1. Configure your Go environment according to https://golang.org/doc/install.
-2. Verify that GOPATH environment variable is set correctly
-3. Download the source code:
-   ```sh
-   go get github.com/Venafi/vcert/v5
-   ```
-   
-   or pre Go 1.13
-
-   ```sh
-   git clone https://github.com/Venafi/vcert.git $GOPATH/src/github.com/Venafi/vcert/v5
-   ```
-
-   Go 1.11 with go modules enabled or go 1.13 and up make sure to clone outside of `$GOPATH/src`
-   ```sh
-   git clone https://github.com/Venafi/vcert.git
-   ```
-
-4. Build the command line utilities for Linux, macOS, and Windows:
-   ```sh
-   make build
-   ```
-
-## Using VCert to integrate CyberArk with your application
-
-For code samples of programmatic use, please review the files in [examples folder](./examples).
-
-### Common part
-1. In your `main.go` file, make the following import declarations:  
-   ```golang
-   import (
-       "github.com/Venafi/vcert/v5"
-       "github.com/Venafi/vcert/v5/pkg/certificate"
-       "github.com/Venafi/vcert/v5/pkg/endpoint"
-   )
-   ```
-2. Create a configuration object of type `&vcert.Config` that specifies the CyberArk connection details. Solutions are 
-typically designed to get those details from a secrets vault, .ini file, environment variables, or command line parameters.
-
-### Enroll certificate
-1. Instantiate a client by calling the `NewClient` method of the vcert class with the configuration object.
-2. Compose a certificate request object of type `&certificate.Request`.
-3. Generate a key pair and CSR for the certificate request by calling the `GenerateRequest` method of the client.
-4. Submit the request by passing the certificate request object to the `RequestCertificate` method of the client.
-5. Use the request ID to pickup the certificate using the `RetrieveCertificate` method of the client.
-
-### New TLS listener for domain
-1. Call `vcert.Config` method `NewListener` with list of domains as arguments. 
-For example `("test.example.com:8443", "example.com")`
-2. Use gotten `net.Listener` as argument to built-in `http.Serve` or other https servers. 
-
-Samples are in a state where you can build/execute them using the following commands (after setting the environment 
-variables discussed later):
-```sh
-go build -o cli ./example
-go test -v ./example -run TestRequestCertificate
+```yaml
+certificateTasks:
+  - name: shared-service-cert
+    renewBefore: 1d
+    request:
+      csr: service
+      pickupFirst: true            # <-- Enables automatic multi-node convergence
+      zone: 'Private 5 days'
+      subject:
+        commonName: 'shared.example.com'
+    installations:
+      - format: PEM
+        file: /etc/ssl/certs/app.crt
+        keyFile: /etc/ssl/private/app.key
+        chainFile: /etc/ssl/certs/chain.crt
+        afterInstallAction: "systemctl reload nginx"
 ```
 
-## Prerequisites for using with CyberArk Certificate Manager, Self-Hosted
+---
 
-1. A user account that has been granted WebSDK Access
-2. A folder (zone) where the user has been granted the following permissions: `View`, `Read`, `Write`, `Create`, 
-`Revoke` (for the revoke action), and `Private Key Read` (for the pickup action when CSR is service generated)
-3. Policy applied to the folder which specifies:
-    1. CA Template that CyberArk Certificate Manager, Self-Hosted will use to enroll certificate requests submitted by VCert
-    2. Subject DN values for Organizational Unit (OU), Organization (O), City (L), State (ST) and Country (C)
-    3. Management Type not locked or locked to 'Enrollment'
-    4. Certificate Signing Request (CSR) Generation unlocked or not locked to 'Service Generated CSR'
-    5. Generate Key/CSR on Application not locked or locked to 'No'
-    6. (Recommended) Disable Automatic Renewal set to 'Yes'
-    7. (Recommended) Key Bit Strength set to 2048 or higher
-    8. (Recommended) Domain Whitelisting policy appropriately assigned
+## How the Nodes Coordinate Automatically
 
-The requirement for the CA Template to be assigned by policy follows a long-standing CyberArk best practice 
-which also met our design objective to keep the certificate request process simple for VCert users. 
-If you require the ability to specify the CA Template with the request you can use the CyberArk Certificate Manager, Self-Hosted REST APIs 
-but please be advised this goes against CyberArk recommendations.
-
-## Testing with CyberArk Certificate Manager, Self-Hosted and CyberArk Certificate Manager, SaaS
-
-Unit tests:
-```sh
-make test
+```
+                   vcert run -f playbook.yaml
+                              │
+                 Does cert exist on Platform?
+                             ╱ ╲
+                       YES ╱     ╲ NO
+                         ╱         ╲
+      Is Platform newer             Node 1 (First to run):
+     than installed cert?           - Falls through & Enrolls cert
+            ╱ ╲                     - Key generated on Platform (csr: service)
+      YES ╱     ╲ NO (Match)        - Installs cert + key locally
+        ╱         ╲
+ Node 2 (Follower):  Both Nodes (Cron / Next run):
+ - Downloads cert    - Thumbprints match
+   + key from DEK    - Checks renewBefore window
+ - Installs locally  - If healthy: Exits in < 1s with NO action
+ - ZERO enrollment
 ```
 
-Integration tests for CyberArk Certificate Manager, Self-Hosted and CyberArk Certificate Manager, SaaS require access to those products. Environment 
-variables are used to specify required settings including credentials.  The CyberArk Certificate Manager, SaaS API key and zone value
-fragments (i.e. `Application Name`\\`Issuing Template API Alias`) are readily available in the web interface.
+### Execution Lifecycle
 
-```sh
-export TPP_URL=https://cmsh.cyberark.example/vedsdk
-export TPP_USER=tpp-user
-export TPP_PASSWORD=tpp-password
-export TPP_ZONE='some\suggested_policy'
-export TPP_ZONE_RESTRICTED='some\locked_policy'
-export TPP_ZONE_ECDSA='some\ecdsa_policy'
+1. **Whichever node runs first (e.g. Node 1 - The Pioneer)**:
+   * Queries the platform for `shared.example.com`.
+   * Finds nothing &rarr; automatically falls through to enroll it.
+   * The platform generates the private key (`csr: service`) and issues the certificate.
+   * Node 1 installs the certificate, private key, and chain locally, then executes `afterInstallAction`.
 
-make tpp_test
+2. **The other node (Node 2 - The Follower)**:
+   * Runs the **identical command**: `vcert run -f playbook.yaml`.
+   * Queries the platform for `shared.example.com`.
+   * Finds the certificate already enrolled by Node 1.
+   * Since Node 2 has no certificate installed yet, it downloads the certificate and the vaulted private key (via secure DEK decryption) and installs them.
+   * **Zero duplicate enrollment requests are created.**
+
+3. **Subsequent runs on all nodes (e.g. automated daily cron)**:
+   * Both nodes run `vcert run -f playbook.yaml`.
+   * Both inspect their local certificate: the SHA-1 thumbprint matches the platform certificate.
+   * Both evaluate the `renewBefore` window. If the certificate is healthy, both exit in **< 1 second** with *"certificate in good health. No actions needed"*.
+   * When the renewal window eventually arrives, whichever node executes first renews the certificate. The remaining nodes automatically pick up the new certificate and private key on their next run.
+
+---
+
+## Decision Engine Matrix
+
+Before triggering any certificate request, VCert evaluates a 4-way decision matrix:
+
+| State | Condition | VCert Action |
+|---|---|---|
+| **Match** | Local thumbprint == Platform thumbprint | Defer to `renewBefore` window check. Exit in <1s if healthy. |
+| **Platform Newer** | Platform NotAfter > Local NotAfter (or no local cert) | Download certificate + private key + chain, install, trigger `afterInstallAction`. Skip enrollment. |
+| **Platform Older** | Platform NotAfter < Local NotAfter | Refuse downgrade with a warning log. Exit cleanly. |
+| **Not Found** | No certificate matching Common Name or `pickupId` | Fall through to standard certificate enrollment. |
+
+---
+
+## Quickstart & Verification
+
+### Using Pre-built Windows Binary
+A pre-compiled 64-bit Windows binary is included in the release:
+
+```powershell
+.\vcert.exe --version
+# Output: vcert.exe version v5.13.9-pickupFirst
+
+.\vcert.exe run -f ./playbook.yaml
 ```
 
-```sh
-export CLOUD_URL=https://api.venafi.cloud/v1
-export CLOUD_APIKEY=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-export CLOUD_ZONE='My Application\Permissive CIT'
-export CLOUD_ZONE_RESTRICTED='Your Application\Restrictive CIT'
+### Building from Source
 
-make cloud_test
+You can compile VCert for any operating platform (Linux, macOS, Windows) using Go 1.21+:
+
+#### Linux (x86_64 / amd64)
+```bash
+GOOS=linux GOARCH=amd64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.9-pickupFirst -s -w" -o vcert ./cmd/vcert
+chmod +x vcert
+./vcert --version
 ```
 
-Command line utility tests make use of [Cucumber & Aruba](https://github.com/cucumber/aruba) feature files.
+#### Linux (ARM64)
+```bash
+GOOS=linux GOARCH=arm64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.9-pickupFirst -s -w" -o vcert ./cmd/vcert
+```
 
-- To run tests for all features in parallel:
-   ```sh
-   make cucumber
-   ```
-  
-- To run tests only for a specific feature:
-  ```sh
-  make cucumber FEATURE=./features/basic/version.feature
-  ```
-  Available features are: 
-  - `basic`
-  - `config`
-  - `enroll`
-  - `format`
-  - `gencsr`
-  - `renew`
-  - `revoke`
+#### macOS (Apple Silicon / arm64)
+```bash
+GOOS=darwin GOARCH=arm64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.9-pickupFirst -s -w" -o vcert ./cmd/vcert
+```
 
-When run, these tests will be executed in their own Docker container using the Ruby version of Cucumber.  
-The completed test run will report on the number of test scenarios and steps that passed, failed, or were skipped. 
+#### macOS (Intel / amd64)
+```bash
+GOOS=darwin GOARCH=amd64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.9-pickupFirst -s -w" -o vcert ./cmd/vcert
+```
 
-## Playbook functionality
+#### Windows (amd64)
+```powershell
+$env:GOOS="windows"; $env:GOARCH="amd64"
+go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.9-pickupFirst -s -w" -o vcert.exe ./cmd/vcert
+```
 
-For detailed explanations about the playbook and how it is build please check here: [Readme Playbook](./README-PLAYBOOK.md)
+### Running Unit Tests
+```bash
+go test -v ./pkg/playbook/app/service -run TestPickupFirst
+go test -v ./pkg/playbook/app/vcertutil -run Test
+```
 
-## Contributing to VCert
+---
 
-CyberArk welcomes contributions from the developer community.
+## Platform Support
 
-1. Fork it to your account (https://github.com/Venafi/vcert/fork)
-2. Clone your fork:
-   ```sh
-   git clone git@github.com:youracct/vcert.git
-   ```
-3. Create a feature branch:
-   ```sh
-   git checkout -b your-branch-name
-   ```
-4. Implement and test your changes
-5. Commit your changes:
-   ```sh
-   git commit -am 'Added some cool functionality'
-   ```
-6. Push to the branch
-   ```sh
-   git push origin your-branch-name
-   ```
-7. Create a new Pull Request at https://github.com/youracct/vcert/pull/new/your-branch-name
+| Platform | Supported | Private Key Retrieval | Discovery Method |
+|---|:---:|---|---|
+| **Venafi TPP** (Self-Hosted) | Yes | Vaulted key via TPP WebSDK (`/vedsdk/Certificates/Retrieve`) | DN search: `<zone>\<commonName>` or custom `pickupId` |
+| **CyberArk Certificate Manager SaaS (NGTS)** | Yes | Data Encryption Key (DEK) decryption via `/v1/certificates/{id}/privatekey` | CN search: `/v1/certificates?filter=subjectCN:eq:...` or fingerprint |
+
+---
+
+## Documentation & Guides
+
+* **Interactive Guide**: Open [`pickup_first_guide.html`](pickup_first_guide.html) in your browser for a visual topology walkthrough.
+* **Playbook Reference**: See [`README-PLAYBOOK.md`](README-PLAYBOOK.md) for full configuration specifications.
+* **Distribution Guide**: See [`README-DISTRIBUTION.md`](README-DISTRIBUTION.md) for architecture details.
+* **Platform CLIs**:
+  * [CyberArk Certificate Manager, SaaS (NGTS)](README-CLI-NGTS.md)
+  * [CyberArk Certificate Manager, Self-Hosted (TPP)](README-CLI-PLATFORM.md)
+  * [CyberArk Workload Identity Manager (Firefly)](README-CLI-FIREFLY.md)
+
+---
 
 ## License
 
-Copyright &copy; Venafi, Inc. and CyberArk Software Ltd. ("CyberArk")
-
-VCert is licensed under the Apache License, Version 2.0. See [LICENSE](./LICENSE) for the full license text.
-
-Please direct questions/comments to mis-opensource@cyberark.com.
+This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details.
