@@ -68,6 +68,13 @@ certificateTasks:
 
 ## 🔄 How the Nodes Coordinate Automatically
 
+<p align="center">
+  <img src="docs/images/nodes_coordination.jpg" alt="How the Nodes Coordinate Automatically" width="100%" />
+</p>
+
+<details>
+<summary><b>Click to expand text / ASCII Flowchart</b></summary>
+
 ```
                    vcert run -f playbook.yaml
                               │
@@ -86,6 +93,8 @@ certificateTasks:
  - Installs locally  - If healthy: Exits in < 1s with NO action
  - ZERO enrollment
 ```
+
+</details>
 
 ### Coordination Lifecycle
 
