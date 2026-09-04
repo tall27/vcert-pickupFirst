@@ -8,6 +8,7 @@ aruba/bin/
 aruba/vcert
 aruba/tpp-bundle.pem
 aruba/firefly-bundle.pem
+vcert.exe
 Gemfile.lock
 aruba/features/step_definitions/0.endpoints.rb
 aruba/log.log
@@ -19,10 +20,11 @@ vendor
 google_auth.json
 *.out
 /vcert
+vcert
 
-# Secrets, sensitive files and test artifacts
-.env
-.env.*
+# Binaries, secrets, sensitive files, build & test artifacts
+artifacts/
+.env*
 load-env.ps1
 *.key
 *.pem

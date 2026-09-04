@@ -147,20 +147,18 @@ The following table summarizes the files added or modified to implement this fea
 | [`pkg/venafi/ngts/search.go`](pkg/venafi/ngts/search.go) | Modified | Added `CertificateStatus` field to NGTS `Certificate` model. |
 | [`pkg/playbook/app/service/pickup_first_test.go`](pkg/playbook/app/service/pickup_first_test.go) | **NEW** | Unit test suite verifying all 4 decision matrix paths and edge cases. |
 | [`pkg/playbook/app/vcertutil/vcertutil_test.go`](pkg/playbook/app/vcertutil/vcertutil_test.go) | **NEW** | Unit test suite for locator helpers. |
-| [`pickup_first_guide.html`](pickup_first_guide.html) | **NEW** | Standalone visual documentation guide (Light theme). |
 
 ---
 
 ## 🚀 Building & Running
 
-### Pre-built Binary (Windows x64)
-The root directory includes a pre-compiled Windows executable:
-```powershell
-.\vcert.exe --version
-# Output: vcert.exe version v5.13.9-pickupFirst
-```
+### Building from Source (Go 1.21+)
 
-### Compiling from Source for Other Platforms (Go 1.21+)
+#### Windows (`amd64`)
+```powershell
+go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.9-pickupFirst -s -w" -o vcert.exe ./cmd/vcert
+.\vcert.exe --version
+```
 
 #### Linux (`amd64` / `arm64`)
 ```bash
@@ -182,7 +180,6 @@ go test -v ./pkg/playbook/app/vcertutil -run Test
 ---
 
 ## 📚 Additional Resources
-* **Visual Interactive Guide**: Open [`pickup_first_guide.html`](pickup_first_guide.html) in any browser.
 * **Full Playbook Reference**: [`README-PLAYBOOK.md`](README-PLAYBOOK.md)
 * **Upstream VCert Project**: [github.com/Venafi/vcert](https://github.com/Venafi/vcert)
 
