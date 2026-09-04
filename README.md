@@ -150,7 +150,24 @@ The following table summarizes the files added or modified to implement this fea
 
 ---
 
-## 🚀 Building & Running
+## 🚀 Download Packages & Building
+
+### 📦 Pre-compiled Downloads (All Platforms)
+
+Pre-compiled binary packages matching the official Venafi distribution structure are available on the [**GitHub Releases Page**](https://github.com/tall27/vcert-pickupFirst/releases/tag/v5.13.9-pickupFirst):
+
+| Platform | Architecture | Download Package |
+|---|---|---|
+| **Linux** | `x86_64` (amd64) | [`vcert_v5.13.9-pickupFirst_linux.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.9-pickupFirst/vcert_v5.13.9-pickupFirst_linux.zip) |
+| **Linux** | `ARM64` (aarch64) | [`vcert_v5.13.9-pickupFirst_linux_arm.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.9-pickupFirst/vcert_v5.13.9-pickupFirst_linux_arm.zip) |
+| **Linux** | `i386` (32-bit) | [`vcert_v5.13.9-pickupFirst_linux86.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.9-pickupFirst/vcert_v5.13.9-pickupFirst_linux86.zip) |
+| **macOS** | Apple Silicon (`arm64`) | [`vcert_v5.13.9-pickupFirst_darwin_arm.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.9-pickupFirst/vcert_v5.13.9-pickupFirst_darwin_arm.zip) |
+| **macOS** | Intel (`amd64`) | [`vcert_v5.13.9-pickupFirst_darwin.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.9-pickupFirst/vcert_v5.13.9-pickupFirst_darwin.zip) |
+| **Windows** | `x86_64` (amd64) | [`vcert_v5.13.9-pickupFirst_windows.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.9-pickupFirst/vcert_v5.13.9-pickupFirst_windows.zip) |
+| **Windows** | `i386` (32-bit) | [`vcert_v5.13.9-pickupFirst_windows86.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.9-pickupFirst/vcert_v5.13.9-pickupFirst_windows86.zip) |
+| **Windows** | `ARM64` | [`vcert_v5.13.9-pickupFirst_windows_arm.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.9-pickupFirst/vcert_v5.13.9-pickupFirst_windows_arm.zip) |
+
+---
 
 ### Building from Source (Go 1.21+)
 
