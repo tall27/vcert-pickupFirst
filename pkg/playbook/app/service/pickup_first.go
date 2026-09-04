@@ -19,24 +19,26 @@ package service
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"os"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/Venafi/vcert/v5/pkg/certificate"
 	"github.com/Venafi/vcert/v5/pkg/playbook/app/domain"
 	"github.com/Venafi/vcert/v5/pkg/playbook/app/installer"
 	"github.com/Venafi/vcert/v5/pkg/playbook/app/vcertutil"
 )
 
 // pickupFirstAttempt implements pickup-first mode (request.pickupFirst=true).
-// Supported backends: TPP and NGTS. On other backends (Firefly, etc.)
-// the feature is a silent no-op and the standard playbook flow runs.
+// Supported backends: TPP, NGTS, and CyberArk Certificate Manager, SaaS (VCP/Cloud). On other backends
+// (Firefly, etc.) the feature is a silent no-op and the standard playbook flow runs.
 //
 // Decision flow on each run:
 //
 //   1. Locate the platform's "current" cert for this CN. TPP returns its
-//      cert-object DN + metadata; NGTS queries certificate search by CN
+//      cert-object DN + metadata; NGTS/Cloud queries certificate search by CN
 //      and picks the latest valid certificate.
 //   2. Cheap compare (thumbprint + ValidTo) against the installed cert:
 //        match                -> defer to existing renewBefore check (handled=false).
@@ -107,6 +109,27 @@ func pickupFirstAttempt(config domain.Config, task domain.CertificateTask) (hand
 	}
 	if pcc == nil || pcc.Certificate == "" {
 		return false, nil
+	}
+
+	if pcc.PrivateKey == "" {
+		// If platform has no vaulted key, check if a matching private key already exists on disk
+		for _, inst := range task.Installations {
+			if inst.KeyFile != "" {
+				if keyData, err := os.ReadFile(inst.KeyFile); err == nil && len(keyData) > 0 {
+					pcc.PrivateKey = string(keyData)
+					zap.L().Info("pickupFirst: attached existing private key from disk", zap.String("keyFile", inst.KeyFile))
+					break
+				}
+			}
+		}
+		if pcc.PrivateKey == "" {
+			zap.L().Info("pickupFirst: no private key on platform or local disk; falling through to enroll")
+			return false, nil
+		}
+	}
+	if certReq != nil {
+		// Key is already populated in pcc.PrivateKey; prevent CreateX509Cert from attempting AddPrivateKey(nil)
+		certReq.CsrOrigin = certificate.ServiceGeneratedCSR
 	}
 
 	x509Certificate, preparedPcc, err := installer.CreateX509Cert(pcc, certReq, true)

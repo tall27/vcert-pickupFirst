@@ -14,8 +14,7 @@
 This repository is an **extension fork of the official [Venafi VCert (`Venafi/vcert`)](https://github.com/Venafi/vcert)** project.
 
 * **Upstream Project**: [https://github.com/Venafi/vcert](https://github.com/Venafi/vcert)
-* **Official Documentation**: [Venafi Documentation](https://docs.venafi.com) | [CyberArk Certificate Manager](https://docs.cyberark.com)
-* **Scope of this Repository**: This repository focuses specifically on the **delta changes** required to resolve [**GitHub Issue #649**](https://github.com/Venafi/vcert/issues/649) (`pickupFirst` mode for Playbooks), supporting both **Venafi TPP** (Self-Hosted) and **CyberArk Certificate Manager SaaS (NGTS)**.
+* **Scope of this Repository**: This repository focuses specifically on the **delta changes** required to resolve [**GitHub Issue #649**](https://github.com/Venafi/vcert/issues/649) (`pickupFirst` mode for Playbooks), supporting **Venafi TPP** (Self-Hosted), **CyberArk Certificate Manager SaaS (NGTS)**, and **Venafi Cloud / CyberArk Certificate Manager SaaS (`vcp`, API key authentication)**.
 
 For standard VCert CLI options, PKI setup, and general architecture, please consult the upstream [Venafi/vcert](https://github.com/Venafi/vcert) repository.
 
@@ -142,11 +141,14 @@ The following table summarizes the files added or modified to implement this fea
 | [`pkg/playbook/app/service/service.go`](pkg/playbook/app/service/service.go) | Modified | Hooked `pickupFirstAttempt` into playbook `Execute()` before enrollment checks. |
 | [`pkg/playbook/app/domain/playbookRequest.go`](pkg/playbook/app/domain/playbookRequest.go) | Modified | Added `PickupFirst bool` and `PickupID string` fields to `PlaybookRequestCertificate`. |
 | [`pkg/playbook/app/installer/crypto.go`](pkg/playbook/app/installer/crypto.go) | Modified | Added `LoadInstalledPEM` to inspect locally installed certificates for SHA-1 fingerprint & expiration. |
-| [`pkg/playbook/app/vcertutil/vcertutil.go`](pkg/playbook/app/vcertutil/vcertutil.go) | Modified | Added `LocateLatestCN` (multi-platform discovery for TPP and NGTS) and `PickupCertificateByLocator`. |
+| [`pkg/playbook/app/vcertutil/vcertutil.go`](pkg/playbook/app/vcertutil/vcertutil.go) | Modified | Added `LocateLatestCN` (multi-platform discovery for TPP, NGTS, and Cloud/VCP) and `PickupCertificateByLocator`. |
+| [`pkg/venafi/cloud/connector.go`](pkg/venafi/cloud/connector.go) | Modified | Added `SearchCertificatesByCN`, `SearchCertificatesByFingerprint`, and `GetCertificateDetails`. Fixed `RetrieveCertificateMetaData` to return error instead of panic. |
+| [`pkg/venafi/cloud/search.go`](pkg/venafi/cloud/search.go) | Modified | Added `CertificateStatus` field to Cloud `Certificate` model. |
 | [`pkg/venafi/ngts/connector.go`](pkg/venafi/ngts/connector.go) | Modified | Added `SearchCertificatesByCN`, `SearchCertificatesByFingerprint`, and `GetCertificateDetails`. |
 | [`pkg/venafi/ngts/search.go`](pkg/venafi/ngts/search.go) | Modified | Added `CertificateStatus` field to NGTS `Certificate` model. |
+| [`examples/playbook/vcp_pickup_first.yaml`](examples/playbook/vcp_pickup_first.yaml) | **NEW** | Example playbook demonstrating `pickupFirst` on CyberArk Certificate Manager SaaS (`vcp`). |
 | [`pkg/playbook/app/service/pickup_first_test.go`](pkg/playbook/app/service/pickup_first_test.go) | **NEW** | Unit test suite verifying all 4 decision matrix paths and edge cases. |
-| [`pkg/playbook/app/vcertutil/vcertutil_test.go`](pkg/playbook/app/vcertutil/vcertutil_test.go) | **NEW** | Unit test suite for locator helpers. |
+| [`pkg/playbook/app/vcertutil/vcertutil_test.go`](pkg/playbook/app/vcertutil/vcertutil_test.go) | **NEW** | Unit test suite for locator helpers (NGTS and Cloud). |
 
 ---
 

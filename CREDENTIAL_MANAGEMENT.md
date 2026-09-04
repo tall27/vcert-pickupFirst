@@ -106,6 +106,31 @@ certificateTasks:
         afterInstallAction: "systemctl reload nginx"
 ```
 
+For **CyberArk Certificate Manager, SaaS** (`platform: vcp`) authenticating with an API key:
+
+```yaml
+config:
+  connection:
+    platform: vcp
+    credentials:
+      apiKey: "${VCP_APIKEY}"
+
+certificateTasks:
+  - name: shared-service-cert
+    renewBefore: 5d
+    request:
+      pickupFirst: true                 # Automatic multi-node convergence
+      zone: '<APPLICATION_NAME>\<ISSUING_TEMPLATE>'
+      subject:
+        commonName: 'shared.example.com'
+    installations:
+      - format: PEM
+        file: /etc/ssl/certs/app.crt
+        keyFile: /etc/ssl/private/app.key
+        chainFile: /etc/ssl/certs/chain.crt
+        afterInstallAction: "systemctl reload nginx"
+```
+
 ---
 
 ### Method D: OAuth Access Token Caching with `getcred`

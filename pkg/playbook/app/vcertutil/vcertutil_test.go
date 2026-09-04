@@ -24,6 +24,7 @@ import (
 
 	"github.com/Venafi/vcert/v5/pkg/playbook/app/domain"
 	"github.com/Venafi/vcert/v5/pkg/venafi"
+	"github.com/Venafi/vcert/v5/pkg/venafi/cloud"
 	"github.com/Venafi/vcert/v5/pkg/venafi/ngts"
 )
 
@@ -77,6 +78,60 @@ func TestFindNewestNGTSCert(t *testing.T) {
 	bestR, bestREnd := findNewestNGTSCert(onlyRetired)
 	assert.NotNil(t, bestR)
 	assert.Equal(t, "cert-r2", bestR.Id)
+	parsedT3, _ := time.Parse(time.RFC3339, t3)
+	assert.Equal(t, parsedT3.Unix(), bestREnd.Unix())
+}
+
+func TestFindNewestCloudCert(t *testing.T) {
+	t1 := time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339)
+	t2 := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	t3 := time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339)
+
+	certs := []cloud.Certificate{
+		{
+			Id:                "cloud-1",
+			Fingerprint:       "FP1",
+			ValidityEnd:       t1,
+			CertificateStatus: "ACTIVE",
+		},
+		{
+			Id:                "cloud-2",
+			Fingerprint:       "FP2",
+			ValidityEnd:       t2,
+			CertificateStatus: "ACTIVE",
+		},
+		{
+			Id:                "cloud-retired",
+			Fingerprint:       "FP3",
+			ValidityEnd:       t3,
+			CertificateStatus: "RETIRED",
+		},
+	}
+
+	// Should pick cloud-2 because cloud-retired is retired even though t3 > t2
+	best, bestEnd := findNewestCloudCert(certs)
+	assert.NotNil(t, best)
+	assert.Equal(t, "cloud-2", best.Id)
+	assert.Equal(t, "FP2", best.Fingerprint)
+	parsedT2, _ := time.Parse(time.RFC3339, t2)
+	assert.Equal(t, parsedT2.Unix(), bestEnd.Unix())
+
+	// If only retired certs exist, should pick newest overall
+	onlyRetired := []cloud.Certificate{
+		{
+			Id:                "cloud-r1",
+			ValidityEnd:       t1,
+			CertificateStatus: "RETIRED",
+		},
+		{
+			Id:                "cloud-r2",
+			ValidityEnd:       t3,
+			CertificateStatus: "RETIRED",
+		},
+	}
+	bestR, bestREnd := findNewestCloudCert(onlyRetired)
+	assert.NotNil(t, bestR)
+	assert.Equal(t, "cloud-r2", bestR.Id)
 	parsedT3, _ := time.Parse(time.RFC3339, t3)
 	assert.Equal(t, parsedT3.Unix(), bestREnd.Unix())
 }

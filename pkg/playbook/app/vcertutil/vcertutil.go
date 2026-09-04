@@ -35,6 +35,7 @@ import (
 	"github.com/Venafi/vcert/v5/pkg/endpoint"
 	"github.com/Venafi/vcert/v5/pkg/playbook/app/domain"
 	"github.com/Venafi/vcert/v5/pkg/util"
+	"github.com/Venafi/vcert/v5/pkg/venafi/cloud"
 	"github.com/Venafi/vcert/v5/pkg/venafi/ngts"
 	"github.com/Venafi/vcert/v5/pkg/venafi/tpp"
 	"github.com/Venafi/vcert/v5/pkg/verror"
@@ -441,6 +442,8 @@ func LocateLatestCN(config domain.Config, request domain.PlaybookRequest) (*Loca
 		return locateTPP(config, request)
 	case endpoint.ConnectorTypeNGTS:
 		return locateNGTS(config, request)
+	case endpoint.ConnectorTypeCloud:
+		return locateCloud(config, request)
 	default:
 		return nil, ErrLocateNotSupported
 	}
@@ -582,9 +585,120 @@ func findNewestNGTSCert(certs []ngts.Certificate) (*ngts.Certificate, time.Time)
 	return newest, newestEnd
 }
 
+func locateCloud(config domain.Config, request domain.PlaybookRequest) (*LocateResult, error) {
+	conn, err := buildClient(config, request.Zone, request.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("could not build Cloud connector: %w", err)
+	}
+
+	cloudConn, ok := conn.(*cloud.Connector)
+	if !ok {
+		return nil, fmt.Errorf("connector is not *cloud.Connector")
+	}
+
+	// 1. If PickupID is specified:
+	if request.PickupID != "" {
+		// Case A: Try as Certificate ID (UUID)
+		certDetails, err := cloudConn.GetCertificateDetails(request.PickupID)
+		if err == nil && certDetails != nil && certDetails.Fingerprint != "" {
+			return &LocateResult{
+				Thumbprint: NormalizeThumbprint(certDetails.Fingerprint),
+				ValidTo:    certDetails.ValidityEnd,
+				Found:      true,
+				ID:         certDetails.ID,
+				UseCertID:  true,
+			}, nil
+		}
+
+		// Case B: Try as Fingerprint
+		fpSearch, err := cloudConn.SearchCertificatesByFingerprint(request.PickupID)
+		if err == nil && fpSearch != nil && len(fpSearch.Certificates) > 0 {
+			bestCert, bestEnd := findNewestCloudCert(fpSearch.Certificates)
+			if bestCert != nil {
+				return &LocateResult{
+					Thumbprint: NormalizeThumbprint(bestCert.Fingerprint),
+					ValidTo:    bestEnd,
+					Found:      true,
+					ID:         bestCert.Id,
+					UseCertID:  true,
+				}, nil
+			}
+		}
+	}
+
+	// 2. Standard case: search by Common Name
+	cn := request.Subject.CommonName
+	if cn == "" {
+		return &LocateResult{Found: false}, nil
+	}
+
+	searchRes, err := cloudConn.SearchCertificatesByCN(cn)
+	if err != nil {
+		return &LocateResult{Found: false}, err
+	}
+	if searchRes == nil || len(searchRes.Certificates) == 0 {
+		return &LocateResult{Found: false}, nil
+	}
+
+	bestCert, bestEnd := findNewestCloudCert(searchRes.Certificates)
+	if bestCert == nil {
+		return &LocateResult{Found: false}, nil
+	}
+
+	return &LocateResult{
+		Thumbprint: NormalizeThumbprint(bestCert.Fingerprint),
+		ValidTo:    bestEnd,
+		Found:      true,
+		ID:         bestCert.Id,
+		UseCertID:  true,
+	}, nil
+}
+
+func findNewestCloudCert(certs []cloud.Certificate) (*cloud.Certificate, time.Time) {
+	var newest *cloud.Certificate
+	var newestEnd time.Time
+
+	// First pass: try to find the newest non-retired certificate
+	for i := range certs {
+		c := &certs[i]
+		if strings.EqualFold(c.CertificateStatus, "RETIRED") {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, c.ValidityEnd)
+		if err != nil {
+			t, err = time.Parse(time.RFC3339Nano, c.ValidityEnd)
+		}
+		if err == nil {
+			if newest == nil || t.After(newestEnd) {
+				newest = c
+				newestEnd = t
+			}
+		}
+	}
+
+	// Second pass: if all were retired or no active found, take the newest overall
+	if newest == nil {
+		for i := range certs {
+			c := &certs[i]
+			t, err := time.Parse(time.RFC3339, c.ValidityEnd)
+			if err != nil {
+				t, err = time.Parse(time.RFC3339Nano, c.ValidityEnd)
+			}
+			if err == nil {
+				if newest == nil || t.After(newestEnd) {
+					newest = c
+					newestEnd = t
+				}
+			}
+		}
+	}
+
+	return newest, newestEnd
+}
+
 // PickupCertificateByLocator fetches the full cert (+ key if requested)
 // using the platform-appropriate identifier from a prior LocateLatestCN
-// call. On TPP loc.ID is used as PickupID; on NGTS loc.ID is used as CertID.
+// call. On TPP loc.ID is used as PickupID; on NGTS and Cloud loc.ID is used as CertID.
 func PickupCertificateByLocator(config domain.Config, request domain.PlaybookRequest, loc *LocateResult, keyPassword string, fetchKey bool) (*certificate.PEMCollection, *certificate.Request, error) {
 	if loc == nil {
 		return nil, nil, fmt.Errorf("nil LocateResult")

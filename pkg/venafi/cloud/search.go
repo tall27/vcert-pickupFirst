@@ -84,6 +84,7 @@ type Certificate struct {
 	Fingerprint                   string              `json:"fingerprint"`
 	ValidityStart                 string              `json:"validityStart"`
 	ValidityEnd                   string              `json:"validityEnd"`
+	CertificateStatus             string              `json:"certificateStatus,omitempty"`
 	ApplicationIds                []string            `json:"applicationIds"`
 	/* ... and many more fields ... */
 }
