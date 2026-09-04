@@ -1,0 +1,27 @@
+config:
+  connection:
+    type: TLSPC
+    credentials:
+      apiKey: fooo123bar!
+      tokenURL: okta.com
+      audience: someAudience
+certificateTasks:
+  - name: mtls
+    request:
+      zone: "Open Source\\vcert"
+      subject:
+        commonName: foo.bar.123.venafi.com
+        country: US
+        locality: Salt Lake City
+        province: Utah
+        organization: Venafi Inc
+        orgUnits:
+          - engineering
+          - marketing
+      csrOrigin: service
+      keyPassword: "Passcode123!"
+    installations:
+      - type: PKCS12
+        location: "/Users/rvela/venafi/supertreat/p12/foo.p12"
+        afterInstallAction: ""
+    renewBefore: 31d

@@ -1,0 +1,856 @@
+/*
+ * Copyright Venafi, Inc. and CyberArk Software Ltd. ("CyberArk")
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package certificate
+
+import (
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
+	"encoding/pem"
+	"math/big"
+	"net"
+	"os"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Venafi/vcert/v5/pkg/util"
+)
+
+func getCertificateRequestForTest() *Request {
+	req := Request{}
+	req.Subject.CommonName = "vcert.test.vfidev.com"
+	req.Subject.Organization = []string{"Venafi, Inc."}
+	req.Subject.OrganizationalUnit = []string{"Engineering", "Automated Tests"}
+	req.Subject.Country = []string{"US"}
+	req.Subject.Locality = []string{"SLC"}
+	req.Subject.Province = []string{"Utah"}
+
+	host, _ := os.Hostname()
+	req.DNSNames = []string{host}
+
+	addrs, _ := net.InterfaceAddrs()
+	var ips []net.IP
+	for _, add := range addrs {
+		ip, _, _ := net.ParseCIDR(add.String())
+		v4 := ip.To4()
+		if v4 != nil && !v4.IsLoopback() {
+			ips = append(ips, ip)
+		}
+
+	}
+	req.IPAddresses = ips
+
+	req.ExtKeyUsages = *NewExtKeyUsageSlice("ServerAuth")
+
+	return &req
+}
+
+func generateTestCertificate() (*x509.Certificate, crypto.Signer, error) {
+	req := getCertificateRequestForTest()
+
+	priv, err := GenerateECDSAPrivateKey(EllipticCurveP384)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	certBytes, err := generateSelfSigned(req, x509.KeyUsageKeyEncipherment|x509.KeyUsageDigitalSignature, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, priv)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cert, err := x509.ParseCertificate(certBytes)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return cert, priv, nil
+}
+
+func generateSelfSigned(request *Request, ku x509.KeyUsage, eku []x509.ExtKeyUsage, privateKey crypto.Signer) ([]byte, error) {
+	notBefore := time.Now()
+	limit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serial, _ := rand.Int(rand.Reader, limit)
+
+	certRequest := x509.Certificate{
+		SerialNumber: serial,
+	}
+	certRequest.Subject = request.Subject
+	certRequest.DNSNames = request.DNSNames
+	certRequest.EmailAddresses = request.EmailAddresses
+	certRequest.IPAddresses = request.IPAddresses
+	certRequest.SignatureAlgorithm = request.SignatureAlgorithm
+	certRequest.ExtKeyUsage = eku
+	certRequest.NotBefore = notBefore.UTC()
+	if ku&x509.KeyUsageCertSign != x509.KeyUsageCertSign {
+		certRequest.NotAfter = certRequest.NotBefore.AddDate(0, 0, 90)
+		certRequest.IsCA = false
+	} else {
+		certRequest.NotAfter = certRequest.NotBefore.AddDate(0, 0, 180)
+		certRequest.IsCA = true
+	}
+	certRequest.BasicConstraintsValid = true
+
+	pub := publicKey(privateKey)
+
+	cert, err := x509.CreateCertificate(rand.Reader, &certRequest, &certRequest, pub, privateKey)
+	if err != nil {
+		cert = nil
+	}
+
+	return cert, err
+}
+
+func TestGenerateRSAPrivateKey(t *testing.T) {
+	priv, err := GenerateRSAPrivateKey(2048)
+	if err != nil {
+		t.Fatalf("Error generating RSA Private Key\nError: %s", err)
+	}
+
+	err = priv.Validate()
+	if err != nil {
+		t.Fatalf("Error validating RSA Private Key\nError: %s", err)
+	}
+}
+
+func TestGenerateECDSAPrivateKey(t *testing.T) {
+	ellipticCurves := []EllipticCurve{EllipticCurveP256, EllipticCurveP384, EllipticCurveP521}
+	for _, curve := range ellipticCurves {
+		_, err := GenerateECDSAPrivateKey(curve)
+		if err != nil {
+			t.Fatalf("Error generating ECDSA Private Key\nError: %s", err)
+		}
+	}
+}
+
+func TestGenerateCertificateRequestWithRSAKey(t *testing.T) {
+	req := getCertificateRequestForTest()
+	var err error
+	req.PrivateKey, err = GenerateRSAPrivateKey(2048)
+	if err != nil {
+		t.Fatalf("Error generating RSA Private Key\nError: %s", err)
+	}
+
+	err = req.GenerateCSR()
+	if err != nil {
+		t.Fatalf("Error generating Certificate Request\nError: %s", err)
+	}
+
+	pemBlock, _ := pem.Decode(req.GetCSR())
+	if pemBlock == nil {
+		t.Fatalf("Failed to decode CSR as PEM")
+	}
+
+	parsedReq, err := x509.ParseCertificateRequest(pemBlock.Bytes)
+	if err != nil {
+		t.Fatalf("Error parsing generated Certificate Request\nError: %s", err)
+	}
+
+	err = parsedReq.CheckSignature()
+	if err != nil {
+		t.Fatalf("Error checking signature of generated Certificate Request\nError: %s", err)
+	}
+
+	validateExtendedKeyUsage(t, parsedReq)
+}
+
+func TestGenerateCertificateRequestWithECDSAKey(t *testing.T) {
+	req := getCertificateRequestForTest()
+	var err error
+	req.PrivateKey, err = GenerateECDSAPrivateKey(EllipticCurveP521)
+	if err != nil {
+		t.Fatalf("Error generating RSA Private Key\nError: %s", err)
+	}
+
+	err = req.GenerateCSR()
+	if err != nil {
+		t.Fatalf("Error generating Certificate Request\nError: %s", err)
+	}
+
+	pemBlock, _ := pem.Decode(req.GetCSR())
+	if pemBlock == nil {
+		t.Fatalf("Failed to decode CSR as PEM")
+	}
+
+	parsedReq, err := x509.ParseCertificateRequest(pemBlock.Bytes)
+	if err != nil {
+		t.Fatalf("Error parsing generated Certificate Request\nError: %s", err)
+	}
+
+	err = parsedReq.CheckSignature()
+	if err != nil {
+		t.Fatalf("Error checking signature of generated Certificate Request\nError: %s", err)
+	}
+}
+
+func TestGenerateCertificateRequestWithED25519Key(t *testing.T) {
+	req := getCertificateRequestForTest()
+	var err error
+	req.PrivateKey, err = GenerateED25519PrivateKey()
+	if err != nil {
+		t.Fatalf("Error generating RSA Private Key\nError: %s", err)
+	}
+
+	err = req.GenerateCSR()
+	if err != nil {
+		t.Fatalf("Error generating Certificate Request\nError: %s", err)
+	}
+
+	pemBlock, _ := pem.Decode(req.GetCSR())
+	if pemBlock == nil {
+		t.Fatalf("Failed to decode CSR as PEM")
+	}
+
+	parsedReq, err := x509.ParseCertificateRequest(pemBlock.Bytes)
+	if err != nil {
+		t.Fatalf("Error parsing generated Certificate Request\nError: %s", err)
+	}
+
+	err = parsedReq.CheckSignature()
+	if err != nil {
+		t.Fatalf("Error checking signature of generated Certificate Request\nError: %s", err)
+	}
+}
+
+func validateExtendedKeyUsage(t *testing.T, parsedReq *x509.CertificateRequest) {
+	if parsedReq.Extensions == nil {
+		t.Fatalf("No extensions found in generated Certificate Request")
+	}
+
+	var extKeyUsages pkix.Extension
+	for _, extension := range parsedReq.Extensions {
+		if extension.Id.Equal(ExtensionExtKeyUsageOid) {
+			extKeyUsages = extension
+			break
+		}
+	}
+
+	if extKeyUsages.Id == nil {
+		t.Fatalf("No extension Extended Key Usages found in generated Certificate Request")
+	}
+
+	var b []asn1.ObjectIdentifier
+	_, err := asn1.Unmarshal(extKeyUsages.Value, &b)
+	if err != nil {
+		panic(err)
+	}
+
+	if len(b) != 1 {
+		t.Fatalf("Invalid extension Extended Key Usages found in generated Certificate Request. It was expected only one but it was gotten %q", len(b))
+	}
+
+	if !b[0].Equal(ExtKeyUsageServerAuthOid) {
+		t.Fatalf("Invalid extension Extended Key Usages found in generated Certificate Request. It was expected %q but it was gotten %q", ExtKeyUsageServerAuthOid, b[0])
+	}
+}
+
+func TestEllipticCurveString(t *testing.T) {
+	curve := EllipticCurveP521
+	stringCurve := curve.String()
+	if stringCurve != "P521" {
+		t.Fatalf("Unexpected string value was returned.  Expected: P521 Actual: %s", stringCurve)
+	}
+	curve = EllipticCurveP384
+	stringCurve = curve.String()
+	if stringCurve != "P384" {
+		t.Fatalf("Unexpected string value was returned.  Expected: P384 Actual: %s", stringCurve)
+	}
+	curve = EllipticCurveP256
+	stringCurve = curve.String()
+	if stringCurve != "P256" {
+		t.Fatalf("Unexpected string value was returned.  Expected: P256 Actual: %s", stringCurve)
+	}
+}
+
+func TestEllipticCurveSetByString(t *testing.T) {
+	curve := EllipticCurveDefault
+	curve.Set("P521")
+	if curve != EllipticCurveP521 {
+		t.Fatalf("Unexpected string value was returned.  Expected: P521 Actual: %s", curve.String())
+	}
+	curve.Set("P384")
+	if curve != EllipticCurveP384 {
+		t.Fatalf("Unexpected string value was returned.  Expected: P384 Actual: %s", curve.String())
+	}
+	curve.Set("P256")
+	if curve != EllipticCurveP256 {
+		t.Fatalf("Unexpected string value was returned.  Expected: P256 Actual: %s", curve.String())
+	}
+	curve.Set("p521")
+	if curve != EllipticCurveP521 {
+		t.Fatalf("Unexpected string value was returned.  Expected: p521 Actual: %s", curve.String())
+	}
+	curve.Set("p384")
+	if curve != EllipticCurveP384 {
+		t.Fatalf("Unexpected string value was returned.  Expected: p384 Actual: %s", curve.String())
+	}
+	curve.Set("p256")
+	if curve != EllipticCurveP256 {
+		t.Fatalf("Unexpected string value was returned.  Expected: p256 Actual: %s", curve.String())
+	}
+}
+
+func TestKeyTypeString(t *testing.T) {
+	keyType := KeyTypeECDSA
+	s := keyType.String()
+	if s != "ECDSA" {
+		t.Fatalf("Unexpected string value was returned.  Expected: ECDSA Actual: %s", s)
+	}
+	keyType = KeyTypeRSA
+	s = keyType.String()
+	if s != "RSA" {
+		t.Fatalf("Unexpected string value was returned.  Expected: RSA Actual: %s", s)
+	}
+	keyType = 5
+	s = keyType.String()
+	if s != "" {
+		t.Fatalf("Unexpected string value was returned.  Expected: \"\" Actual: %s", s)
+	}
+}
+
+func TestKeyTypeSetByString(t *testing.T) {
+	keyType := KeyTypeRSA
+	keyType.Set("rsa", "")
+	if keyType != KeyTypeRSA {
+		t.Fatalf("Unexpected string value was returned.  Expected: RSA Actual: %s", keyType.String())
+	}
+	keyType.Set("RSA", "")
+	if keyType != KeyTypeRSA {
+		t.Fatalf("Unexpected string value was returned.  Expected: RSA Actual: %s", keyType.String())
+	}
+	keyType.Set("ecdsa", "")
+	if keyType != KeyTypeECDSA {
+		t.Fatalf("Unexpected string value was returned.  Expected: ECDSA Actual: %s", keyType.String())
+	}
+	keyType.Set("ECDSA", "p384")
+	if keyType != KeyTypeECDSA {
+		t.Fatalf("Unexpected string value was returned.  Expected: ECDSA Actual: %s", keyType.String())
+	}
+	keyType.Set("ECDSA", "p384")
+	if keyType != KeyTypeECDSA {
+		t.Fatalf("Unexpected string value was returned.  Expected: ECDSA Actual: %s", keyType.String())
+	}
+	keyType.Set("EC", "p384")
+	if keyType != KeyTypeECDSA {
+		t.Fatalf("Unexpected string value was returned.  Expected: ECDSA Actual: %s", keyType.String())
+	}
+	keyType.Set("EC", "ed25519")
+	if keyType != KeyTypeED25519 {
+		t.Fatalf("Unexpected string value was returned.  Expected: ED25519 Actual: %s", keyType.String())
+	}
+}
+
+func TestGetPrivateKeyPEMBock(t *testing.T) {
+	var priv crypto.Signer
+	priv, err := GenerateRSAPrivateKey(2048)
+	if err != nil {
+		t.Fatalf("Error generating RSA Private Key\nError: %s", err)
+	}
+
+	p, err := GetPrivateKeyPEMBock(priv)
+	if err != nil {
+		t.Fatalf("Error: %s", err)
+	}
+	if p == nil {
+		t.Fatalf("GetPrivateKeyPEMBock returned nil for RSA key")
+	}
+
+	ellipticCurves := []EllipticCurve{EllipticCurveP256, EllipticCurveP384, EllipticCurveP521}
+	for _, curve := range ellipticCurves {
+		priv, err = GenerateECDSAPrivateKey(curve)
+		if err != nil {
+			t.Fatalf("Error generating ECDSA Private Key\nError: %s", err)
+		}
+
+		p, err = GetPrivateKeyPEMBock(priv)
+		if err != nil {
+			t.Fatalf("Error: %s", err)
+		}
+		if p == nil {
+			t.Fatalf("GetPrivateKeyPEMBock returned nil for ECDSA key")
+		}
+	}
+}
+
+func TestGetEncryptedPrivateKeyPEMBock(t *testing.T) {
+	var priv crypto.Signer
+	priv, err := GenerateRSAPrivateKey(2048)
+	if err != nil {
+		t.Fatalf("Error generating RSA Private Key\nError: %s", err)
+	}
+
+	p, err := GetEncryptedPrivateKeyPEMBock(priv, []byte("something"))
+	if err != nil {
+		t.Fatalf("Error: %s", err)
+	}
+	if p == nil {
+		t.Fatalf("GetPrivateKeyPEMBock returned nil for RSA key")
+	}
+
+	encoded := pem.EncodeToMemory(p)
+	str, err := util.DecryptPkcs8PrivateKey(string(encoded), "something")
+	if err != nil {
+		t.Fatalf("Error: %s", err)
+	}
+
+	p, _ = pem.Decode([]byte(str))
+	if p == nil {
+		t.Fatalf("missing private key PEM")
+	}
+
+	_, err = x509.ParsePKCS8PrivateKey(p.Bytes)
+	if err != nil {
+		t.Fatalf("Error: %s", err)
+	}
+
+	ellipticCurves := []EllipticCurve{EllipticCurveP256, EllipticCurveP384, EllipticCurveP521}
+	for _, curve := range ellipticCurves {
+		priv, err = GenerateECDSAPrivateKey(curve)
+		if err != nil {
+			t.Fatalf("Error generating ECDSA Private Key\nError: %s", err)
+		}
+
+		p, err = GetEncryptedPrivateKeyPEMBock(priv, []byte("something"))
+		if err != nil {
+			t.Fatalf("Error: %s", err)
+		}
+		if p == nil {
+			t.Fatalf("GetPrivateKeyPEMBock returned nil for ECDSA key")
+		}
+
+		strPem := string(pem.EncodeToMemory(p))
+
+		decryptedKey, err := util.DecryptPkcs8PrivateKey(strPem, "something")
+		if err != nil {
+			t.Fatalf("Error: %s", err)
+		}
+		p, _ = pem.Decode([]byte(decryptedKey))
+		_, err = x509.ParsePKCS8PrivateKey(p.Bytes)
+		if err != nil {
+			t.Fatalf("Error: %s", err)
+		}
+	}
+}
+
+func TestGetCertificatePEMBlock(t *testing.T) {
+	cert, _, err := generateTestCertificate()
+	if err != nil {
+		t.Fatalf("Error generating test certificate\nError: %s", err)
+	}
+	certPem := GetCertificatePEMBlock(cert.Raw)
+	if certPem == nil {
+		t.Fatalf("GetCertificatePEMBlock returned nil pem block")
+	}
+}
+
+func TestGetCertificateRequestPEMBlock(t *testing.T) {
+	certRequest := getCertificateRequestForTest()
+	var priv crypto.Signer
+	priv, err := GenerateRSAPrivateKey(2048)
+	if err != nil {
+		t.Fatalf("Error generating RSA Private Key\nError: %s", err)
+	}
+	err = GenerateRequest(certRequest, priv)
+	if err != nil {
+		t.Fatalf("Error generating request\nError: %s", err)
+	}
+	csrPem := GetCertificateRequestPEMBlock(certRequest.GetCSR())
+	if csrPem == nil {
+		t.Fatalf("GetCertificateRequestPEMBlock returned nil pem block")
+	}
+}
+
+func TestPublicKey(t *testing.T) {
+	priv, _ := GenerateRSAPrivateKey(2048)
+	pub := PublicKey(priv)
+	if pub == nil {
+		t.Fatal("should return public key")
+	}
+}
+
+const (
+	checkCertificatePrivateKeyRSAvalid = `
+-----BEGIN PRIVATE KEY-----
+MIICeAIBADANBgkqhkiG9w0BAQEFAASCAmIwggJeAgEAAoGBAKiD4hrY58XqeYEB
+yIg14R6R2Ia/53cBSkNhzRn7Q9wDIzA8qJUkGNu8Oz0nE2V3LhDXsNM7B+IgO1LB
+YRBgegCKHpQVsYlnNUmETbJSILEsbEZZLCaMBXC/xONKpJi9E3qyNr6vNvYxd12O
+l9RN3tTl6NJG5gS8BAf8Z6X7r6bdAgMBAAECgYEAjpLGgiByOCkhk9yGZXfwd4S9
+xYQnubAFvOzKMuk7iLG+29j2aPiZb4/aLusYpggnmWhj2tNe4BqVFnc2QDzf+qTO
+fEmDm1mBnc0V+k0Rt99Wq9KPVMAm2EJBFrUGK7VGQ3H4B02kS+ywz6z25mebCzBT
+JlA7m3jaUdGJQEEPXgECQQDcVwlQrTPOxkG6UX3wfqtSgby0nVPH1N7h+aIVRbZY
+wfdXFsJEIv9ePly0S8MFLpxBNczR4Dqpm6ViEGkUEM+tAkEAw8mt5TAw9//38x0n
+ZyeYhGrM0qOMHHLw5XhnaJPiJ4NyU96aspr+Ppv4Z550f+Z3dIGSKnDinQly1jL1
+f21Z8QJBAKrR7y7UmG2d1icUNobULQ3x9tIvhlxN891NIxNK0GtPNOoXgtRALapq
+voQomDDUSd9kTj4HkHMdb8Hu5wffYKECQA5NBfGusnT68m6Em6MyRjat4mYkYhCV
+6LiqMct2udcvB8POh7gyEA4csGlJLrNE70bITBfjhPn5fbTdpgb3wtECQQC4dQBg
+335myMx7IDWT/I6R7i0Rx+WY7XZ84PkTwTd0q78yIhRS/42rgwEBMkkxlSg5X2sb
+Xjw3nEoRoeTEToar
+-----END PRIVATE KEY-----
+`
+	checkCertificatePrivateKeyRSAinvalid = `
+-----BEGIN PRIVATE KEY-----
+MIICdQIBADANBgkqhkiG9w0BAQEFAASCAl8wggJbAgEAAoGBAKOZvVaHHImhKD+r
+RZXJYV8busd0g0uWBGMeK+VltyG8H/h/neyPmHoEh62P/3FG3UP7oOAAGfz3/yCW
+hf7fHmNz1d6/HyCdQvD4kz/e9E6ty+k1iM5X6pGS97xPsObgHfyOgLn1/YdKvq81
+yG+O/mtfqQEI2izYUAbhUtq3qbctAgMBAAECgYAumTzH56YmQYQAVp10Y67bcz+J
+TlOTdQB85vwj1AwMjNQiaN8noWMR5jZrJmfg8QlXMtYI156PYmgF9Tnndc/mmVlg
+ow9mqEWjXZoBLCP++EkAbQ8dwmuGJB9WzIWFvj6bnKUOJAqQpsXv/wOqcrO7RZb0
+h2Wt/08tpuMZSYnUtQJBANIOKhCxJGjRbPgiczPFauuPi/kqSl1tLFbJfK0XBOvg
+Dezwz4YZpkhj1ttM6JB8QcDHEOMZ3XJMu+m8TqAB4cMCQQDHYmL7FzFg8QGeeeUe
+a4EVFSxmN45y2qSq2KyN0eaeuuV+fHjiLFyi+rZ+gA9xnyQFWcwTH+tFvcbi5aI7
+WgRPAkAC2XBWo6CDz3tz7juz0xS9N0hFy/4QQF/emYMYcfx+Gp71vNqDzitERh5v
+AR8Sfq0BqXGgMwSe/U17QTOr1fqzAkAFiwixbl2jElA3NbBW/ioiieooFVdSfh2h
+2lBByRoeQ5fpwlAiCZWxukKkla7YO9Jmi66OwY5q6/HBkRzHhaMlAkAEeP1wnnnQ
+F3iRLaRPmLtKf8sO1onEkSaQAq5p8/RFvNNwwqMh1t9wu9UYIefICoFsK0wAza9j
+4qQY8qM+To1X
+-----END PRIVATE KEY-----
+`
+	checkCertificateCSRRSA = `
+-----BEGIN CERTIFICATE REQUEST-----
+MIIBrDCCARUCAQAwbDELMAkGA1UEBhMCVVMxDTALBgNVBAgMBFV0YWgxEjAQBgNV
+BAcMCVNhbHQgTGFrZTEPMA0GA1UECgwGVmVuYWZpMQ8wDQYDVQQLDAZEZXZPcHMx
+GDAWBgNVBAMMD3Rlc3QudmVuZGV2LmNvbTCBnzANBgkqhkiG9w0BAQEFAAOBjQAw
+gYkCgYEAqIPiGtjnxep5gQHIiDXhHpHYhr/ndwFKQ2HNGftD3AMjMDyolSQY27w7
+PScTZXcuENew0zsH4iA7UsFhEGB6AIoelBWxiWc1SYRNslIgsSxsRlksJowFcL/E
+40qkmL0TerI2vq829jF3XY6X1E3e1OXo0kbmBLwEB/xnpfuvpt0CAwEAAaAAMA0G
+CSqGSIb3DQEBCwUAA4GBAGsKm5fJ8Zm/j9XMPXhPYmOdiDj+9QlcFq7uRRqwpxo7
+C507RR5Pj2zBRZRLJcc/bNTQFqnW92kIcvJ+YvrQl/GkEMKM2wds/RyMXRHtOJvZ
+YQt6JtkAeQOMECJ7RRHrZiG+m2by2YAB2krthK2gJGSr80xWzZWzrgdwdTe2sxUG
+-----END CERTIFICATE REQUEST-----
+`
+	chechCertificateRSACert = `
+-----BEGIN CERTIFICATE-----
+MIICyjCCAbICCQDtS0qAZisbTTANBgkqhkiG9w0BAQsFADBmMQswCQYDVQQGEwJV
+UzENMAsGA1UECAwEVXRhaDESMBAGA1UEBwwJU2FsdCBMYWtlMQ8wDQYDVQQKDAZW
+ZW5hZmkxDzANBgNVBAsMBkRldk9wczESMBAGA1UEAwwJVmVuYWZpIENBMB4XDTE5
+MDMxNDE1MjAzMloXDTE5MDQxMzE1MjAzMlowbDELMAkGA1UEBhMCVVMxDTALBgNV
+BAgMBFV0YWgxEjAQBgNVBAcMCVNhbHQgTGFrZTEPMA0GA1UECgwGVmVuYWZpMQ8w
+DQYDVQQLDAZEZXZPcHMxGDAWBgNVBAMMD3Rlc3QudmVuZGV2LmNvbTCBnzANBgkq
+hkiG9w0BAQEFAAOBjQAwgYkCgYEAqIPiGtjnxep5gQHIiDXhHpHYhr/ndwFKQ2HN
+GftD3AMjMDyolSQY27w7PScTZXcuENew0zsH4iA7UsFhEGB6AIoelBWxiWc1SYRN
+slIgsSxsRlksJowFcL/E40qkmL0TerI2vq829jF3XY6X1E3e1OXo0kbmBLwEB/xn
+pfuvpt0CAwEAATANBgkqhkiG9w0BAQsFAAOCAQEAMsuZogw+GE3ACQpULxxC3GFP
++3N91g79V5PBP9flBuMuNoC5sQdEFaRBYA7VAUc/0kwT9hbQsm6GO/PnuhDljkqB
+2toPXTW5Okg93r0ZlTKrNWamsj3b5JQOB/dvjBx2c4VDzaD7lO0WMPaNbc0DV1Mm
+5UGslmj7iZIMRmyV4Cvdq/1u3/GjjO8q7qglltYtCP79xAw78dCbhtbdFzCixJ+g
+wNesasf48fL5jiH4gCwpzNij0ryhR0zglz+TsHRGVMef2CNFOw0PfkinQoaDI/Y+
+e/0CZ8Cg2oudlSulDRWzFJBwiCapeRfwkLkhO/pjd0ILvBk8DFzjwCFTpi2SpQ==
+-----END CERTIFICATE-----
+`
+	chechCertificateRSACert2 = `
+-----BEGIN CERTIFICATE-----
+MIICyjCCAbICCQDtS0qAZisbTjANBgkqhkiG9w0BAQsFADBmMQswCQYDVQQGEwJV
+UzENMAsGA1UECAwEVXRhaDESMBAGA1UEBwwJU2FsdCBMYWtlMQ8wDQYDVQQKDAZW
+ZW5hZmkxDzANBgNVBAsMBkRldk9wczESMBAGA1UEAwwJVmVuYWZpIENBMB4XDTE5
+MDMxNDE4MDMwMVoXDTE5MDQxMzE4MDMwMVowbDELMAkGA1UEBhMCVVMxDTALBgNV
+BAgMBFV0YWgxEjAQBgNVBAcMCVNhbHQgTGFrZTEPMA0GA1UECgwGVmVuYWZpMQ8w
+DQYDVQQLDAZEZXZPcHMxGDAWBgNVBAMMD3Rlc3QudmVuZGV2LmNvbTCBnzANBgkq
+hkiG9w0BAQEFAAOBjQAwgYkCgYEAo5m9VocciaEoP6tFlclhXxu6x3SDS5YEYx4r
+5WW3Ibwf+H+d7I+YegSHrY//cUbdQ/ug4AAZ/Pf/IJaF/t8eY3PV3r8fIJ1C8PiT
+P970Tq3L6TWIzlfqkZL3vE+w5uAd/I6AufX9h0q+rzXIb47+a1+pAQjaLNhQBuFS
+2repty0CAwEAATANBgkqhkiG9w0BAQsFAAOCAQEAfb5V/rcEEsZ68rRaEerkvPCk
+EiBMepUAzGrUFQyENiA2qoRuqKnOjhyzZ4uFiXFamiqCK0kjzUVraAYjzhGkH6AU
+AxUKXh5fa9tkt0XsZCS1aTjuDYAPO2Ug62OejUoZtRjy+nGUM7dYku9syzhmQ+hK
+AHu1RG+ZOtT13j3SAH0nkjEADzzsZhZWj/m5HtGQUY9ehAQhbTqn/M+aeGPxOdPt
+Ys0kiIJWXXW4JpJLfwKE9VFERQdHVum0+j8dUfOfyo0clJLPcesBFQ4RRkituxnG
+vDm5x5eZ/dsjYa8CcADBe/2KJBnldZW02o1/OqJ67m2Q1Y74hRTV5MGybpYx/w==
+-----END CERTIFICATE-----
+`
+)
+
+func TestRequest_CheckCertificate(t *testing.T) {
+	rsaPrivKeyInvalid := pemRSADecode(checkCertificatePrivateKeyRSAinvalid)
+	rsaPrivKeyValid := pemRSADecode(checkCertificatePrivateKeyRSAvalid)
+
+	cases := []struct {
+		name         string
+		request      Request
+		cert         string
+		valid        bool
+		errorMessage string
+	}{
+		{"valid req", Request{KeyType: KeyTypeRSA, PrivateKey: rsaPrivKeyValid}, chechCertificateRSACert, true, ""},
+		{"mismatched key type", Request{KeyType: KeyTypeECDSA, PrivateKey: rsaPrivKeyValid}, chechCertificateRSACert, false, "key type"},
+		{"mismatched keys", Request{KeyType: KeyTypeRSA, PrivateKey: rsaPrivKeyInvalid}, chechCertificateRSACert, false, "key modulus"},
+		{"valid csr", Request{csr: []byte(checkCertificateCSRRSA)}, chechCertificateRSACert, true, ""},
+		{"csr mismatched keys", Request{csr: []byte(checkCertificateCSRRSA)}, chechCertificateRSACert2, false, "key modulus"},
+	}
+	for i := range cases {
+		c := cases[i]
+		t.Run(c.name, func(t *testing.T) {
+			err := c.request.CheckCertificate(c.cert)
+			if c.valid && err != nil {
+				t.Fatalf("cert should be valid but checker found error: %s", err)
+			}
+			if !c.valid && err == nil {
+				t.Fatalf("certificate should failed but check returns that its valid")
+			}
+			if !c.valid && !strings.Contains(err.Error(), c.errorMessage) {
+				t.Fatalf("unexpected error '%s' (should conatins %s)", err.Error(), c.errorMessage)
+			}
+		})
+	}
+}
+
+func Test_NewRequest(t *testing.T) {
+	rsaPk, err := GenerateRSAPrivateKey(2048)
+	if err != nil {
+		t.Fatalf("Error generating RSA Private Key\nError: %s", err)
+	}
+
+	ecdsaPk, err := GenerateECDSAPrivateKey(EllipticCurveP256)
+	if err != nil {
+		t.Fatalf("Error generating ECDSA Private Key\nError: %s", err)
+	}
+
+	ed25519Pk, err := GenerateED25519PrivateKey()
+	if err != nil {
+		t.Fatalf("Error generating ECDSA Private Key\nError: %s", err)
+	}
+
+	cases := []struct {
+		name        string
+		certificate *x509.Certificate
+		expRequest  Request
+	}{
+		{
+			name: "rsa key",
+			certificate: &x509.Certificate{
+				PublicKey: rsaPk.Public(),
+			},
+			expRequest: Request{KeyType: KeyTypeRSA, KeyLength: 2048},
+		},
+		{
+			name: "ecdsa key",
+			certificate: &x509.Certificate{
+				PublicKey: ecdsaPk.Public(),
+			},
+			expRequest: Request{KeyType: KeyTypeECDSA, KeyCurve: EllipticCurveP256},
+		},
+		{
+			name: "ed25519 key",
+			certificate: &x509.Certificate{
+				PublicKey: ed25519Pk.Public(),
+			},
+			expRequest: Request{KeyType: KeyTypeED25519, KeyCurve: EllipticCurveED25519},
+		},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			req := NewRequest(c.certificate)
+			if !reflect.DeepEqual(req, &c.expRequest) {
+				t.Fatalf("expected request to be %v, got %v", c.expRequest, req)
+			}
+		})
+	}
+}
+
+func TestRequest_SetCSR_and_GetCSR(t *testing.T) {
+	checkCN := "setcsr.example.com"
+	certificateRequest := x509.CertificateRequest{}
+	certificateRequest.Subject.CommonName = checkCN
+	pk, err := GenerateRSAPrivateKey(2048)
+	if err != nil {
+		t.Fatalf("Error generating RSA Private Key\nError: %s", err)
+	}
+
+	csr, err := x509.CreateCertificateRequest(rand.Reader, &certificateRequest, pk)
+	if err != nil {
+		csr = nil
+	}
+
+	rawCsr := csr
+
+	pemCsr := pem.EncodeToMemory(GetCertificateRequestPEMBlock(csr))
+	r := Request{}
+
+	csrs := [][]byte{rawCsr, pemCsr}
+	for _, csr := range csrs {
+		err = r.SetCSR(csr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gotCsr := r.GetCSR()
+		block, _ := pem.Decode(gotCsr)
+		cert, err := x509.ParseCertificateRequest(block.Bytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cert.Subject.CommonName != checkCN {
+			t.Fatalf("%s =! %s", cert.Subject.CommonName, checkCN)
+		}
+		err = r.SetCSR(pemCsr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("Got cn %s from csr %s", cert.Subject.CommonName, gotCsr)
+	}
+
+}
+
+func pemRSADecode(priv string) *rsa.PrivateKey {
+	privPem, _ := pem.Decode([]byte(priv))
+
+	parsedKey, err := x509.ParsePKCS8PrivateKey(privPem.Bytes)
+	if err != nil {
+		panic(err)
+	}
+	return parsedKey.(*rsa.PrivateKey)
+}
+
+type FindNewestCertificateWithSansMock struct {
+	// testCase name
+	name string
+	// expected returned certificate
+	expected *CertificateInfo
+	// sans argument passed to FindNewestCertificateWithSans function
+	sans *Sans
+}
+
+func createTimeMock(t *testing.T, s string) time.Time {
+	time, err := time.Parse(time.RFC3339, s)
+
+	if err != nil {
+		t.Error(err)
+		t.Fatalf("error parsing time string %q", s)
+	}
+
+	return time
+}
+
+func TestFindNewestCertificateWithSans(t *testing.T) {
+	// create a list of certificates where we will try to find according to our
+	// testCases, we are not interested in any other field but the `SANS.DNS`,
+	// and `ValidTo` which are the ones used to match in the
+	// `FindNewestCertificateWithSans` function
+	certificates := []*CertificateInfo{
+		{
+			SANS: Sans{
+				DNS: []string{
+					"one.vfidev.com",
+				},
+			},
+			ValidTo: createTimeMock(t, "2022-08-22T00:00:00.000+00:00"),
+		},
+		{
+			SANS: Sans{
+				DNS: []string{
+					"one.vfidev.com",
+					"two.vfidev.com",
+				},
+			},
+			ValidTo: createTimeMock(t, "2022-08-22T00:00:00.000+00:00"),
+		},
+		{
+			SANS: Sans{
+				DNS: []string{
+					"one.vfidev.com",
+					"two.vfidev.com",
+				},
+			},
+			ValidTo: createTimeMock(t, "2030-01-01T00:00:00.000+00:00"),
+		},
+		{
+			SANS: Sans{
+				DNS: []string{
+					"1.vfidev.com",
+					"2.vfidev.com",
+					"3.vfidev.com",
+				},
+			},
+			ValidTo: createTimeMock(t, "2022-08-22T00:00:00.000+00:00"),
+		},
+	}
+
+	testCases := []FindNewestCertificateWithSansMock{
+		// should not return any certificate
+		{
+			name:     "Empty SANS",
+			expected: nil,
+			sans:     nil,
+		},
+		// should return the only existing certificate
+		{
+			name: "Simple",
+			expected: &CertificateInfo{
+				SANS: Sans{
+					DNS: []string{
+						"one.vfidev.com",
+					},
+				},
+				ValidTo: createTimeMock(t, "2022-08-22T00:00:00.000+00:00"),
+			},
+			sans: &Sans{DNS: []string{"one.vfidev.com"}},
+		},
+		//should return the newest certificate
+		{
+			name: "Newest",
+			expected: &CertificateInfo{
+				SANS: Sans{
+					DNS: []string{
+						"one.vfidev.com",
+						"two.vfidev.com",
+					},
+				},
+				ValidTo: createTimeMock(t, "2030-01-01T00:00:00.000+00:00"),
+			},
+			sans: &Sans{DNS: []string{"one.vfidev.com", "two.vfidev.com"}},
+		},
+		// should return the only existing certificate regardless of the order of
+		// the sans arguments
+		{
+			name: "Order of arguments",
+			expected: &CertificateInfo{
+				SANS: Sans{
+					DNS: []string{
+						"1.vfidev.com",
+						"2.vfidev.com",
+						"3.vfidev.com",
+					},
+				},
+				ValidTo: createTimeMock(t, "2022-08-22T00:00:00.000+00:00"),
+			},
+			sans: &Sans{DNS: []string{"3.vfidev.com", "2.vfidev.com", "1.vfidev.com"}},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// ignore error, just use the certificate value as a sign of success
+			certificate, _ := FindNewestCertificateWithSans(certificates, testCase.sans)
+
+			// certificate should have been found but function returned no certificate
+			if testCase.expected != nil && certificate == nil {
+				t.Fatalf("certificate should have been found but function returned no certificate\nsans provided: %v\nexpected certificate: %v", util.GetJsonAsString(testCase.sans), util.GetJsonAsString(testCase.expected))
+			}
+
+			// no certificate should have been found but function returned one
+			if testCase.expected == nil && certificate != nil {
+				t.Fatalf("no certificate should have been found but function returned one\nsans provided: %v\nreturned certificate: %v", util.GetJsonAsString(testCase.sans), util.GetJsonAsString(certificate))
+			}
+
+			if !reflect.DeepEqual(testCase.expected, certificate) {
+				t.Fatalf("certificates did not match.\nexpected:\n%v\ngot:\n%v", util.GetJsonAsString(testCase.expected), util.GetJsonAsString(certificate))
+			}
+		})
+	}
+}

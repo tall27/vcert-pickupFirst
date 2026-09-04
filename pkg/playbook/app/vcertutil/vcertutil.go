@@ -1,0 +1,652 @@
+/*
+ * Copyright Venafi, Inc. and CyberArk Software Ltd. ("CyberArk")
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package vcertutil
+
+import (
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"strings"
+	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/Venafi/vcert/v5"
+	"github.com/Venafi/vcert/v5/pkg/certificate"
+	"github.com/Venafi/vcert/v5/pkg/endpoint"
+	"github.com/Venafi/vcert/v5/pkg/playbook/app/domain"
+	"github.com/Venafi/vcert/v5/pkg/util"
+	"github.com/Venafi/vcert/v5/pkg/venafi/ngts"
+	"github.com/Venafi/vcert/v5/pkg/venafi/tpp"
+	"github.com/Venafi/vcert/v5/pkg/verror"
+)
+
+// EnrollCertificate takes a Request object and requests a certificate to the Venafi platform defined by config.
+//
+// Then it retrieves the certificate and returns it along with the certificate chain and the private key used.
+func EnrollCertificate(config domain.Config, request domain.PlaybookRequest) (*certificate.PEMCollection, *certificate.Request, error) {
+	client, err := buildClient(config, request.Zone, request.Timeout)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	vRequest := buildRequest(request)
+
+	zoneCfg, err := client.ReadZoneConfiguration()
+	if err != nil {
+		return nil, nil, err
+	}
+	zap.L().Debug("successfully read zone config", zap.String("zone", request.Zone))
+
+	err = client.GenerateRequest(zoneCfg, &vRequest)
+	if err != nil {
+		return nil, nil, err
+	}
+	zap.L().Debug("successfully updated Request with zone config values")
+
+	var pcc *certificate.PEMCollection
+
+	if client.SupportSynchronousRequestCertificate() {
+		pcc, err = client.SynchronousRequestCertificate(&vRequest)
+	} else {
+		reqID, reqErr := client.RequestCertificate(&vRequest)
+		if reqErr != nil {
+			return nil, nil, reqErr
+		}
+		zap.L().Debug("successfully requested certificate", zap.String("requestID", reqID))
+
+		vRequest.PickupID = reqID
+
+		pcc, err = client.RetrieveCertificate(&vRequest)
+	}
+
+	if err != nil {
+		return nil, nil, err
+	}
+	zap.L().Debug("successfully retrieved certificate", zap.String("certificate", request.Subject.CommonName))
+
+	return pcc, &vRequest, nil
+}
+
+func buildClient(config domain.Config, zone string, timeout int) (endpoint.Connector, error) {
+	var netTransport = &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   time.Duration(timeout) * time.Second,
+			KeepAlive: time.Duration(timeout) * time.Second,
+		}).DialContext,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	vcertConfig := &vcert.Config{
+		ConnectorType:   config.Connection.GetConnectorType(),
+		BaseUrl:         config.Connection.URL,
+		Zone:            zone,
+		ConnectionTrust: loadTrustBundle(config.Connection.TrustBundlePath),
+		LogVerbose:      false,
+	}
+
+	vcertConfig.Client = &http.Client{
+		Timeout:   time.Duration(DefaultTimeout) * time.Second,
+		Transport: netTransport,
+	}
+	if timeout > 0 {
+		vcertConfig.Client.Timeout = time.Duration(timeout) * time.Second
+	}
+	var connectionTrustBundle *x509.CertPool
+
+	if vcertConfig.ConnectionTrust != "" {
+		zap.L().Debug("Using trust bundle in custom http client")
+		connectionTrustBundle = x509.NewCertPool()
+		if !connectionTrustBundle.AppendCertsFromPEM([]byte(vcertConfig.ConnectionTrust)) {
+			return nil, fmt.Errorf("%w: failed to parse PEM trust bundle", verror.UserDataError)
+		}
+		netTransport.TLSClientConfig = &tls.Config{
+			RootCAs:    connectionTrustBundle,
+			MinVersion: tls.VersionTLS12,
+		}
+
+		vcertConfig.Client.Transport = netTransport
+	}
+
+	// build Authentication object
+	vcertAuth, err := buildVCertAuthentication(config.Connection.Credentials)
+	if err != nil {
+		return nil, err
+	}
+	vcertConfig.Credentials = vcertAuth
+
+	client, err := vcert.NewClient(vcertConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
+func buildVCertAuthentication(playbookAuth domain.Authentication) (*endpoint.Authentication, error) {
+	attrPrefix := "config.connection.credentials.%s"
+
+	vcertAuth := &endpoint.Authentication{}
+
+	// CyberArk Certificate Manager, SaaS API key
+	apiKey, err := getAttributeValue(fmt.Sprintf(attrPrefix, "apiKey"), playbookAuth.APIKey)
+	if err != nil {
+		return nil, err
+	}
+	vcertAuth.APIKey = apiKey
+
+	// CyberArk Certificate Manager, SaaS service account
+	jwt, err := getAttributeValue(fmt.Sprintf(attrPrefix, "externalJWT"), playbookAuth.ExternalJWT)
+	if err != nil {
+		return nil, err
+	}
+	vcertAuth.ExternalJWT = jwt
+
+	tokenURL, err := getAttributeValue(fmt.Sprintf(attrPrefix, "tokenURL"), playbookAuth.TokenURL)
+	if err != nil {
+		return nil, err
+	}
+	vcertAuth.TokenURL = tokenURL
+
+	// CyberArk Certificate Manager, Self-Hosted/Certificate Manager, SaaS/Workload Identity Manager Access token
+	accessToken, err := getAttributeValue(fmt.Sprintf(attrPrefix, "accessToken"), playbookAuth.AccessToken)
+	if err != nil {
+		return nil, err
+	}
+	vcertAuth.AccessToken = accessToken
+
+	// Scope
+	scope, err := getAttributeValue(fmt.Sprintf(attrPrefix, "scope"), playbookAuth.Scope)
+	if err != nil {
+		return nil, err
+	}
+	vcertAuth.Scope = scope
+
+	// Client ID
+	clientID, err := getAttributeValue(fmt.Sprintf(attrPrefix, "clientId"), playbookAuth.ClientId)
+	if err != nil {
+		return nil, err
+	}
+	vcertAuth.ClientId = clientID
+
+	// Client secret
+	clientSecret, err := getAttributeValue(fmt.Sprintf(attrPrefix, "clientSecret"), playbookAuth.ClientSecret)
+	if err != nil {
+		return nil, err
+	}
+	vcertAuth.ClientSecret = clientSecret
+
+	// Return here as Identity provider is nil
+	if playbookAuth.IdentityProvider == nil {
+		return vcertAuth, nil
+	}
+
+	idp := &endpoint.OAuthProvider{}
+
+	// OAuth provider token url
+	idpTokenURL, err := getAttributeValue(fmt.Sprintf(attrPrefix, "idP.tokenURL"), playbookAuth.IdentityProvider.TokenURL)
+	if err != nil {
+		return nil, err
+	}
+	idp.TokenURL = idpTokenURL
+
+	// OAuth provider audience
+	audience, err := getAttributeValue(fmt.Sprintf(attrPrefix, "idP.audience"), playbookAuth.IdentityProvider.Audience)
+	if err != nil {
+		return nil, err
+	}
+	idp.Audience = audience
+
+	vcertAuth.IdentityProvider = idp
+
+	return vcertAuth, nil
+}
+
+func getAttributeValue(attrName string, attrValue string) (string, error) {
+	offset := len(filePrefix)
+	attrValue = strings.TrimSpace(attrValue)
+
+	// No file prefix, return value as is
+	if !strings.HasPrefix(attrValue, filePrefix) {
+		return attrValue, nil
+	}
+
+	data, err := readFile(attrValue[offset:])
+	if err != nil {
+		return "", fmt.Errorf("failed to read value [%s] from authentication object: %w", attrName, err)
+	}
+	fileValue := strings.TrimSpace(string(data))
+
+	return fileValue, nil
+}
+
+func buildRequest(request domain.PlaybookRequest) certificate.Request {
+
+	vcertRequest := certificate.Request{
+		CADN: request.CADN,
+		Subject: pkix.Name{
+			CommonName:         request.Subject.CommonName,
+			Country:            []string{request.Subject.Country},
+			Organization:       []string{request.Subject.Organization},
+			OrganizationalUnit: request.Subject.OrgUnits,
+			Locality:           []string{request.Subject.Locality},
+			Province:           []string{request.Subject.Province},
+		},
+		DNSNames:       request.DNSNames,
+		OmitSANs:       request.OmitSANs,
+		EmailAddresses: request.EmailAddresses,
+		IPAddresses:    getIPAddresses(request.IPAddresses),
+		URIs:           getURIs(request.URIs),
+		UPNs:           request.UPNs,
+		FriendlyName:   request.FriendlyName,
+		ChainOption:    request.ChainOption,
+		KeyPassword:    request.KeyPassword,
+		CustomFields:   request.CustomFields,
+		ExtKeyUsages:   request.ExtKeyUsages,
+	}
+
+	// Set timeout for cert retrieval
+	setTimeout(request, &vcertRequest)
+	//Set Location
+	setLocationWorkload(request, &vcertRequest)
+	//Set KeyType
+	setKeyType(request, &vcertRequest)
+	//Set Origin
+	setOrigin(request, &vcertRequest)
+	//Set Validity
+	setValidity(request, &vcertRequest)
+	//Set CSR
+	setCSR(request, &vcertRequest)
+
+	return vcertRequest
+}
+
+// DecryptPrivateKey takes an encrypted private key and decrypts it using the given password.
+//
+// The private key must be in PKCS8 format.
+func DecryptPrivateKey(privateKey string, password string) (string, error) {
+	privateKey, err := util.DecryptPkcs8PrivateKey(privateKey, password)
+	return privateKey, err
+}
+
+// EncryptPrivateKeyPKCS1 takes a decrypted PKCS8 private key and encrypts it back in PKCS1 format
+func EncryptPrivateKeyPKCS1(privateKey string, password string) (string, error) {
+	privateKey, err := util.EncryptPkcs1PrivateKey(privateKey, password)
+	return privateKey, err
+}
+
+// EncryptPrivateKeyPKCS8 takes a decrypted private key and encrypts it in PKCS8 format
+func EncryptPrivateKeyPKCS8(privateKey string, password string) (string, error) {
+	privateKey, err := util.EncryptPkcs8PrivateKey(privateKey, password)
+	return privateKey, err
+}
+
+// IsValidAccessToken checks that the accessToken in config is not expired.
+func IsValidAccessToken(config domain.Config) (bool, error) {
+	// No access token provided. Use refresh token to get new access token right away
+	if config.Connection.Credentials.AccessToken == "" {
+		return false, fmt.Errorf("an access token was not provided for connection to TPP")
+	}
+
+	vConfig := &vcert.Config{
+		ConnectorType: config.Connection.GetConnectorType(),
+		BaseUrl:       config.Connection.URL,
+		Credentials: &endpoint.Authentication{
+			Scope:       config.Connection.Credentials.Scope,
+			ClientId:    config.Connection.Credentials.ClientId,
+			AccessToken: config.Connection.Credentials.AccessToken,
+		},
+		ConnectionTrust: loadTrustBundle(config.Connection.TrustBundlePath),
+		LogVerbose:      false,
+	}
+
+	client, err := vcert.NewClient(vConfig, false)
+	if err != nil {
+		return false, err
+	}
+
+	_, err = client.(*tpp.Connector).VerifyAccessToken(vConfig.Credentials)
+
+	return err == nil, err
+}
+
+// RefreshTPPTokens uses the refreshToken in config to request a new pair of tokens
+func RefreshTPPTokens(config domain.Config) (string, string, error) {
+	vConfig := &vcert.Config{
+		ConnectorType: config.Connection.GetConnectorType(),
+		BaseUrl:       config.Connection.URL,
+		Credentials: &endpoint.Authentication{
+			Scope:    config.Connection.Credentials.Scope,
+			ClientId: config.Connection.Credentials.ClientId,
+		},
+		ConnectionTrust: loadTrustBundle(config.Connection.TrustBundlePath),
+		LogVerbose:      false,
+	}
+
+	//Creating an empty client
+	client, err := vcert.NewClient(vConfig, false)
+	if err != nil {
+		return "", "", err
+	}
+
+	auth := endpoint.Authentication{
+		RefreshToken: config.Connection.Credentials.RefreshToken,
+		ClientPKCS12: config.Connection.Credentials.P12Task != "",
+		Scope:        config.Connection.Credentials.Scope,
+		ClientId:     config.Connection.Credentials.ClientId,
+	}
+
+	if auth.RefreshToken != "" {
+		resp, err := client.(*tpp.Connector).RefreshAccessToken(&auth)
+		if err != nil {
+			if auth.ClientPKCS12 {
+				resp, err2 := client.(*tpp.Connector).GetRefreshToken(&auth)
+				if err2 != nil {
+					return "", "", errors.Join(err2, err)
+				}
+				return resp.Access_token, resp.Refresh_token, nil
+			}
+			return "", "", err
+		}
+		return resp.Access_token, resp.Refresh_token, nil
+	} else if auth.ClientPKCS12 {
+		auth.RefreshToken = ""
+		resp, err := client.(*tpp.Connector).GetRefreshToken(&auth)
+		if err != nil {
+			return "", "", err
+		}
+		return resp.Access_token, resp.Refresh_token, nil
+	}
+
+	return "", "", fmt.Errorf("no refresh token or certificate available to refresh access token")
+}
+
+func GeneratePassword() string {
+	letterRunes := "abcdefghijklmnopqrstuvwxyz"
+
+	b := make([]byte, 4)
+	_, _ = rand.Read(b)
+
+	for i, v := range b {
+		b[i] = letterRunes[v%byte(len(letterRunes))]
+	}
+
+	randString := string(b)
+
+	return fmt.Sprintf("t%d-%s.temp.pwd", time.Now().Unix(), randString)
+}
+
+// LocateResult describes the cert object the platform currently considers
+// "the" cert matching a given CN/zone. Returned by LocateLatestCN.
+type LocateResult struct {
+	Thumbprint string    // SHA-1 hex, uppercase without colons
+	ValidTo    time.Time
+	Found      bool
+	ID         string    // platform-specific identifier (DN for TPP, UUID for NGTS)
+	UseCertID  bool      // true: use as certificate.Request.CertID (NGTS). false: PickupID (TPP).
+}
+
+// ErrLocateNotSupported is returned by LocateLatestCN when the configured
+// platform does not implement a cheap "what's the current cert for this CN"
+// lookup. Callers should treat it as a signal to bypass pickup-first
+// mode and fall through to the normal enroll flow.
+var ErrLocateNotSupported = fmt.Errorf("certificate locate not supported on this platform")
+
+// ErrMetadataNotSupported is returned by GetCertMetadata when the configured
+// platform does not implement the cheap thumbprint+validity lookup.
+var ErrMetadataNotSupported = fmt.Errorf("certificate metadata lookup not supported on this platform")
+
+// NormalizeThumbprint strips colons, spaces, and dots from a thumbprint and returns uppercase hex.
+func NormalizeThumbprint(thumb string) string {
+	thumb = strings.ReplaceAll(thumb, ":", "")
+	thumb = strings.ReplaceAll(thumb, " ", "")
+	thumb = strings.ReplaceAll(thumb, ".", "")
+	return strings.ToUpper(thumb)
+}
+
+// LocateLatestCN returns the platform-side identity + metadata of the cert
+// the platform currently considers "current" for the playbook task's CN.
+//
+//   - TPP:  reads metadata for the cert object DN (zone + "\" + CN) via
+//           Connector.RetrieveCertificateMetaData.
+//   - NGTS: queries NGTS certificate search API by CN (or pickupId if provided),
+//           and picks the latest valid certificate.
+//   - others: returns ErrLocateNotSupported.
+func LocateLatestCN(config domain.Config, request domain.PlaybookRequest) (*LocateResult, error) {
+	switch config.Connection.GetConnectorType() {
+	case endpoint.ConnectorTypeTPP:
+		return locateTPP(config, request)
+	case endpoint.ConnectorTypeNGTS:
+		return locateNGTS(config, request)
+	default:
+		return nil, ErrLocateNotSupported
+	}
+}
+
+func locateTPP(config domain.Config, request domain.PlaybookRequest) (*LocateResult, error) {
+	connector, err := buildClient(config, request.Zone, request.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("could not build connector: %w", err)
+	}
+	dn := request.PickupID
+	if dn == "" {
+		dn = request.Zone + "\\" + request.Subject.CommonName
+	}
+	md, err := connector.RetrieveCertificateMetaData(dn)
+	if err != nil {
+		return &LocateResult{Found: false}, err
+	}
+	if md == nil || md.CertificateDetails.Thumbprint == "" {
+		return &LocateResult{Found: false}, nil
+	}
+	return &LocateResult{
+		Thumbprint: NormalizeThumbprint(md.CertificateDetails.Thumbprint),
+		ValidTo:    md.CertificateDetails.ValidTo,
+		Found:      true,
+		ID:         dn,
+		UseCertID:  false,
+	}, nil
+}
+
+func locateNGTS(config domain.Config, request domain.PlaybookRequest) (*LocateResult, error) {
+	conn, err := buildClient(config, request.Zone, request.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("could not build NGTS connector: %w", err)
+	}
+
+	ngtsConn, ok := conn.(*ngts.Connector)
+	if !ok {
+		return nil, fmt.Errorf("connector is not *ngts.Connector")
+	}
+
+	// 1. If PickupID is specified:
+	if request.PickupID != "" {
+		// Case A: Try as Certificate ID (UUID)
+		certDetails, err := ngtsConn.GetCertificateDetails(request.PickupID)
+		if err == nil && certDetails != nil && certDetails.Fingerprint != "" {
+			return &LocateResult{
+				Thumbprint: NormalizeThumbprint(certDetails.Fingerprint),
+				ValidTo:    certDetails.ValidityEnd,
+				Found:      true,
+				ID:         certDetails.ID,
+				UseCertID:  true,
+			}, nil
+		}
+
+		// Case B: Try as Fingerprint
+		fpSearch, err := ngtsConn.SearchCertificatesByFingerprint(request.PickupID)
+		if err == nil && fpSearch != nil && len(fpSearch.Certificates) > 0 {
+			bestCert, bestEnd := findNewestNGTSCert(fpSearch.Certificates)
+			if bestCert != nil {
+				return &LocateResult{
+					Thumbprint: NormalizeThumbprint(bestCert.Fingerprint),
+					ValidTo:    bestEnd,
+					Found:      true,
+					ID:         bestCert.Id,
+					UseCertID:  true,
+				}, nil
+			}
+		}
+	}
+
+	// 2. Standard case: search by Common Name
+	cn := request.Subject.CommonName
+	if cn == "" {
+		return &LocateResult{Found: false}, nil
+	}
+
+	searchRes, err := ngtsConn.SearchCertificatesByCN(cn)
+	if err != nil {
+		return &LocateResult{Found: false}, err
+	}
+	if searchRes == nil || len(searchRes.Certificates) == 0 {
+		return &LocateResult{Found: false}, nil
+	}
+
+	bestCert, bestEnd := findNewestNGTSCert(searchRes.Certificates)
+	if bestCert == nil {
+		return &LocateResult{Found: false}, nil
+	}
+
+	return &LocateResult{
+		Thumbprint: NormalizeThumbprint(bestCert.Fingerprint),
+		ValidTo:    bestEnd,
+		Found:      true,
+		ID:         bestCert.Id,
+		UseCertID:  true,
+	}, nil
+}
+
+func findNewestNGTSCert(certs []ngts.Certificate) (*ngts.Certificate, time.Time) {
+	var newest *ngts.Certificate
+	var newestEnd time.Time
+
+	// First pass: try to find the newest non-retired certificate
+	for i := range certs {
+		c := &certs[i]
+		if strings.EqualFold(c.CertificateStatus, "RETIRED") {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, c.ValidityEnd)
+		if err != nil {
+			t, err = time.Parse(time.RFC3339Nano, c.ValidityEnd)
+		}
+		if err == nil {
+			if newest == nil || t.After(newestEnd) {
+				newest = c
+				newestEnd = t
+			}
+		}
+	}
+
+	// Second pass: if all were retired or no active found, take the newest overall
+	if newest == nil {
+		for i := range certs {
+			c := &certs[i]
+			t, err := time.Parse(time.RFC3339, c.ValidityEnd)
+			if err != nil {
+				t, err = time.Parse(time.RFC3339Nano, c.ValidityEnd)
+			}
+			if err == nil {
+				if newest == nil || t.After(newestEnd) {
+					newest = c
+					newestEnd = t
+				}
+			}
+		}
+	}
+
+	return newest, newestEnd
+}
+
+// PickupCertificateByLocator fetches the full cert (+ key if requested)
+// using the platform-appropriate identifier from a prior LocateLatestCN
+// call. On TPP loc.ID is used as PickupID; on NGTS loc.ID is used as CertID.
+func PickupCertificateByLocator(config domain.Config, request domain.PlaybookRequest, loc *LocateResult, keyPassword string, fetchKey bool) (*certificate.PEMCollection, *certificate.Request, error) {
+	if loc == nil {
+		return nil, nil, fmt.Errorf("nil LocateResult")
+	}
+	connector, err := buildClient(config, request.Zone, request.Timeout)
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not build connector for pickup: %w", err)
+	}
+	vReq := buildRequest(request)
+	if loc.UseCertID {
+		vReq.CertID = loc.ID
+	} else {
+		vReq.PickupID = loc.ID
+	}
+	vReq.KeyPassword = keyPassword
+	vReq.FetchPrivateKey = fetchKey
+	if !fetchKey {
+		vReq.CsrOrigin = certificate.LocalGeneratedCSR
+	}
+	pcc, err := connector.RetrieveCertificate(&vReq)
+	if err != nil {
+		return nil, &vReq, err
+	}
+	return pcc, &vReq, nil
+}
+
+// GetCertMetadata returns the platform-side thumbprint (SHA-1, uppercase
+// hex matching TPP's CertificateDetails.Thumbprint format) and ValidTo for
+// the cert object identified by pickupID.
+func GetCertMetadata(config domain.Config, request domain.PlaybookRequest, pickupID string) (thumbprint string, validTo time.Time, err error) {
+	connector, err := buildClient(config, request.Zone, request.Timeout)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("could not build connector for metadata: %w", err)
+	}
+	md, err := connector.RetrieveCertificateMetaData(pickupID)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	if md == nil {
+		return "", time.Time{}, fmt.Errorf("empty metadata response")
+	}
+	return NormalizeThumbprint(md.CertificateDetails.Thumbprint), md.CertificateDetails.ValidTo, nil
+}
+
+// PickupCertificate retrieves a previously-issued certificate (and optionally
+// its private key) from the connected platform without enrolling a new one.
+func PickupCertificate(config domain.Config, request domain.PlaybookRequest, pickupID, keyPassword string, fetchKey bool) (*certificate.PEMCollection, *certificate.Request, error) {
+	connector, err := buildClient(config, request.Zone, request.Timeout)
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not build connector for pickup: %w", err)
+	}
+	vReq := buildRequest(request)
+	vReq.PickupID = pickupID
+	vReq.KeyPassword = keyPassword
+	vReq.FetchPrivateKey = fetchKey
+	if !fetchKey {
+		vReq.CsrOrigin = certificate.LocalGeneratedCSR
+	}
+	pcc, err := connector.RetrieveCertificate(&vReq)
+	if err != nil {
+		return nil, &vReq, err
+	}
+	return pcc, &vReq, nil
+}
+

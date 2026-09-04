@@ -1,0 +1,168 @@
+Feature: -config option
+
+  As a user I want to use -config option which allows storing endpoint connection details in INI file
+
+  (1) Config file may contain either TPP, Cloud, NGTS or test-mode connection configuration
+
+      TPP configuration example:
+
+        url = https://ha-tpp1.venafi.example.com:5008/vedsdk
+        access_token = ns1dofUPmsdxTLQSyhM1gQ==
+        tpp_zone = devops\vcert
+        trust_bundle = ~/.vcert/6.23.crt
+
+      Cloud configuration example:
+
+        cloud_url = https://api.venafi.example.com/v1
+        cloud_apikey = xxxxxxxx-b256-4c43-a4d4-15372ce2d548
+        cloud_zone = Default
+
+      NGTS configuration example:
+
+        ngts_url = https://dev.api.sase.paloaltonetworks.com/ngts
+        ngts_access_token = ns1dofUPmsdxTLQSyhM1gQ==
+        ngts_zone = TestApp\Default
+
+      Test-mode configuration example:
+
+        test_mode = true
+
+  (2) Only above examples' keys are allowed
+
+  (3) If -config option is used, the following options are not allowed:
+
+      -tpp-url
+      -tpp-user
+      -tpp-password
+      -venafi-saas-url
+      -k
+      -test-mode
+
+  (3.1) however, the following options are allowed and do override INI-file configuration values:
+
+      -z
+      -trust-bundle
+
+  (4) There may be many [section]-s in INI-configuration file:
+
+        [ha-tpp1]
+        url = https://ha-tpp1.venafi.example.com:5008/vedsdk
+        access_token = ns1dofUPmsdxTLQSyhM1gQ==
+        tpp_zone = devops\vcert
+        trust_bundle = ~/.vcert/6.23.crt
+
+        [dev12]
+        cloud_url = https://dev12.venafi.example.com/v1
+        cloud_apikey = xxxxxxxx-b256-4c43-a4d4-15372ce2d548
+        cloud_zone = Default
+
+        [mock]
+        test_mode = true
+
+      Each configuration section may be referenced by -profile option
+
+        $ vCert enroll -cn w1.venafi.example.com -config all.ini -profile ha-tpp1
+
+        $ vCert enroll -cn w1.venafi.example.com -config all.ini -profile dev12
+
+        $ vCert enroll -cn w1.venafi.example.com -config all.ini -profile mock
+
+      Empty sections are not valid, however, they are allowed if there are more than one section in INI file.
+
+
+  Background:
+    Given the default aruba exit timeout is 180 seconds
+
+  @FAKE
+  Scenario: Simple enroll with -config test.ini
+    Given a file named "test.ini" with:
+    """
+    test_mode = true
+    """
+    When I try to run `vcert enroll -config test.ini -cn cfg.venafi.example.com -no-prompt -z xxx`
+    Then it should post certificate request
+      And it should retrieve certificate
+
+  @COMMON
+  Scenario: Where it returns error if ini-file doesn't exist
+    When I try to run `vcert enroll -config does-not-exist.ini -cn cfg.venafi.example.com -no-prompt`
+    Then it should fail with "failed to load config"
+
+  @COMMON
+  Scenario: Where it returns error when ini-file is empty
+    Given an empty file named "empty.ini"
+    When I try to run `vcert enroll -config empty.ini -cn cfg.venafi.example.com -no-prompt`
+    Then it should fail with "looks empty"
+
+  @COMMON
+  Scenario: Where it returns error when ini-file contains both TPP and Cloud connection deprecated details
+    Given a file named "mixed.ini" with:
+    """
+    url = https://tpp.venafi.example.com/
+    tpp_user = user
+    tpp_password = xxx
+    tpp_zone = devops\vcert
+    cloud_apikey = xxxxxxxx-b256-4c43-a4d4-15372ce2d548
+    """
+    When I try to run `vcert enroll -config mixed.ini -cn cfg.venafi.example.com -no-prompt`
+    Then it should fail with "illegal key 'cloud_apikey'"
+
+  @COMMON
+  Scenario: Where it returns error when ini-file contains both TPP and Cloud connection details
+    Given a file named "mixed2.ini" with:
+    """
+    url = https://tpp.venafi.example.com/
+    access_token = ns1dofUPmsdxTLQSyhM1gQ==
+    cloud_apikey = xxxxxxxx-b256-4c43-a4d4-15372ce2d548
+    """
+    When I try to run `vcert enroll -config mixed2.ini -cn cfg.venafi.example.com -no-prompt`
+    Then it should fail with "illegal key 'cloud_apikey' in TPP section DEFAULT"
+
+  @COMMON
+  Scenario: Where it returns error when ini-file contains both TPP, Cloud and Oauth for Firefly connection details
+    Given a file named "mixed2.ini" with:
+    """
+    url = https://tpp.venafi.example.com/
+    access_token = ns1dofUPmsdxTLQSyhM1gQ==
+    cloud_apikey = xxxxxxxx-b256-4c43-a4d4-15372ce2d548
+    oauth_access_token = fdfdfdffsdfsfgfsdgefhfhhwqrhgwrhgsf
+    """
+    When I try to run `vcert enroll -config mixed2.ini -cn cfg.venafi.example.com -no-prompt`
+    Then it should fail with "only one between TPP token, cloud api key or OAuth token can be set"
+
+  @TPP
+  Scenario: Where it returns error when TPP configuration doesn't contain user
+    Given a file named "incomplete.ini" with:
+    """
+    url = https://tpp.venafi.example.com/
+    # tpp_user = user
+    tpp_password = xxx
+    tpp_zone = devops\vcert
+    """
+    When I try to run `vcert enroll -config incomplete.ini -cn cfg.venafi.example.com -no-prompt`
+    Then it should fail with "missing TPP user"
+
+  @TPP
+  Scenario: Where it returns error when TPP configuration doesn't contain password
+    Given a file named "incomplete.ini" with:
+    """
+    url = https://tpp.venafi.example.com/
+    tpp_user = user
+    # tpp_password = xxx
+    tpp_zone = devops\vcert
+    """
+    When I try to run `vcert enroll -config incomplete.ini -cn cfg.venafi.example.com -no-prompt`
+    Then it should fail with "missing TPP password"
+
+  @TPP
+  Scenario: Where it returns error when TPP configuration doesn't contain access token
+    Given a file named "incomplete.ini" with:
+    """
+    url = https://tpp.venafi.example.com/
+    #access_token = ns1dofUPmsdxTLQSyhM1gQ==
+    tpp_zone = devops\vcert
+    """
+    When I try to run `vcert enroll -config incomplete.ini -cn cfg.venafi.example.com -no-prompt`
+    Then it should fail with "could not determine connection endpoint with only url information"
+
+

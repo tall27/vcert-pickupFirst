@@ -1,0 +1,306 @@
+# VCert Playbook
+
+VCert Playbook functionality solves the "last mile" problem. VCert has historically done a great job fetching 
+certificates, but getting those certificates installed in the right location usually required custom scripting. The 
+Playbook functionality addresses this use case natively.
+
+## Key features of VCert playbook
+
+- **Simplified commands**: With VCert Playbook, you can avoid long command-line arguments. Instead, use playbook YAML 
+files with VCert to enhance automation and maintenance ease.
+
+- **Flexible certificate placement**: You can designate where to place the certificate and the format in which you 
+want it once received from CyberArk. VCert Playbook supports common keystore formats like PEM, JKS, PKCS#12, accommodating 
+folder locations and the Windows CAPI store.
+
+- **Post-installation actions**: Specify any actions that must be carried out after the certificate is installed. This 
+includes restarting services like Apache or Nginx, or running any other scripts needed once the certificate is in the 
+right location.
+
+- **Smart certificate renewals**: VCert Playbook checks if a certificate already exists and whether it's due for 
+renewal before requesting a new one. This functionality lets you run a script regularly without unnecessarily renewing 
+certificates.
+
+- **Compatibility**: VCert Playbook works seamlessly with CyberArk Certificate Manager, SaaS, CyberArk Certificate Manager, Self-Hosted, CyberArk Workload Identity Manager, and Palo Alto Networks Next-Gen Trust Security (NGTS), ensuring it fits your particular environment.
+
+## Example use cases
+
+- **Automated certificate renewal**: You can set renewal parameters to have VCert automatically renew certificates 
+before expiration. This approach assumes that VCert is part of a daily cronjob or is executed routinely through other 
+automation methods. By default, renewal occurs at 10% of the remaining certificate lifetime.
+
+- **Effortless API access updates**: When using CyberArk Certificate Manager, Self-Hosted, VCert will automatically update API access and 
+refresh tokens within the playbook. This feature ensures continuous operation without manual intervention. It leverages 
+a refresh token to acquire a new access token when needed, an approach that's particularly effective when paired with a 
+long-lasting refresh/grant token and a short-lived access token, such as a 3-year refresh token and a 1-hour access 
+token.
+
+## Getting started
+VCert Playbook functionality is invoked using the `vcert run` command.
+
+1. Create a YAML playbook file.
+    - This readme contains all the valid options and formatting for the YAML playbook.
+    - Sample YAML playbook files are also available in the [examples folder](./examples/playbook)
+2. Execute the playbook using the `vcert run` command:
+    ```sh
+    vcert run -f path/to/my/playbook.yaml
+    ```
+3. Set up a cronjob (or Windows scheduled task) to execute the playbook on a regular basis (usually daily). Sample 
+cronjob entry:
+    ```
+    0 23 * * *     /usr/bin/sudo /usr/local/bin/vcert run -f ~/playbook.yaml >> /var/log/vcert-playbook.log 2>&1
+    ```
+> **Recommended**: For a detailed walkthrough for automating certificate lifecycle management using a VCert Playbook 
+for NGINX, check out the guide on [Dev Central](https://developer.venafi.com/tlsprotectcloud/docs/vcert-auto-cert-mgt-using-tlspc)!
+
+## Usage
+
+VCert run playbook functionality is invoked using the `vcert run` command with additional arguments:
+```sh
+vcert run [OPTIONAL ARGUMENTS]
+```
+For example, the following command will execute the playbook in ./path/to/my/playbook.yaml with debug output enabled:
+```sh
+vcert run --file path/to/my/playbook.yaml --debug
+```
+
+### VCert playbook arguments
+The following arguments are available with the `vcert run` command:
+
+| Argument      | Short | Type    | Description                                                                              |
+|---------------|-------|---------|------------------------------------------------------------------------------------------|
+| `debug`       | `-d`  | boolean | Enables more detailed logging.                                                           |
+| `file`        | `-f`  | string  | The playbook file to be run. Defaults to `playbook.yaml` in current directory.           | 
+| `force-renew` |       | boolean | Requests a new certificate regardless of the expiration date on the current certificate. |
+
+## Playbook samples
+
+Several playbook samples are provided in the [examples folder](./examples/playbook):
+* [Playbook for CAPI store](./examples/playbook/sample.capi.yaml)
+* [Playbook for JKS](./examples/playbook/sample.jks.yaml)
+* [Playbook for PEM](./examples/playbook/sample.pem.yaml)
+* [Playbook for PKCS12](./examples/playbook/sample.pkcs12.yaml)
+* [Playbook for multiple installations](./examples/playbook/sample.multi.yaml)
+* [Playbook for CyberArk Certificate Manager, SaaS](./examples/playbook/sample.tlspc.yaml)
+* [Playbook for CyberArk Workload Identity Manager using client secret authorization](./examples/playbook/sample.firefly.client-secret.yaml)
+* [Playbook for CyberArk Workload Identity Manager using user/password authorization](./examples/playbook/sample.firefly.user-password.yaml)
+* [Playbook for Palo Alto Networks Next-Gen Trust Security](./examples/playbook/sample.ngts.svc-account.yaml)
+
+## Playbook file structure and options
+The playbook file is a YAML file that provides access information to either CyberArk Certificate Manager, SaaS or CyberArk Certificate Manager, Self-Hosted, 
+defines the details of the certificate to request, and specifies the locations where the certificate should be installed.
+
+The top-level structure of the file is described as follows:
+
+### Playbook
+
+| Field            | Type                                                | Required       | Description                                                                                                                                                                   |
+|------------------|-----------------------------------------------------|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| certificateTasks | array of [CertificateTak](#certificatetask) objects | ***Required*** | One or more [CertificateTask](#certificatetask) objects to be executed by VCert.                                                                                                                                                          |
+| config           | [Config](#config) object                            | ***Required*** | Contains one [Connection](#connection) object to either CyberArk Certificate Manager, SaaS, CyberArk Certificate Manager, Self-Hosted, CyberArk Workload Identity Manager, or Palo Alto Networks Next-Gen Trust Security (NGTS). | 
+
+### Config
+
+| Field      | Type                             | Required       | Description                                                                                                                                                                                                                |
+|------------|----------------------------------|----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| connection | [Connection](#connection) object | ***REQUIRED*** | Defines the parameters required to make a connection to one of the following CyberArk platforms:<br/>CyberArk Certificate Manager, SaaS, CyberArk Certificate Manager, Self-Hosted, CyberArk Workload Identity Manager, or Palo Alto Networks Next-Gen Trust Security (NGTS). |
+
+### Connection
+
+| Field       | Type                               | Certificate Manager, Self-Hosted | Certificate Manager, SaaS | Workload Identity Manager | NGTS          | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+|-------------|------------------------------------|----------------------------------|---------------------------|---------------------------|---------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| credentials | [Credentials](#credentials) object | ***Required***                   | ***Required***            | ***Required***            | ***Required*** | A [Credential](#credentials) object that defines the credentials used to authenticate to the selected provider `platform`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| platform    | string                             | ***Required***                   | ***Required***            | ***Required***            | ***Required*** | For CyberArk Certificate Manager, Self-Hosted, either `tpp` or `tlspdc`.<br/>For CyberArk Certificate Manager, SaaS, either `vaas` or `tlspc`.<br/>For CyberArk Workload Identity Manager, use `firefly`.<br/>For Palo Alto Networks Next-Gen Trust Security, use `ngts`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| trustBundle | string                             | *Optional*                       | n/a                       | *Optional*                | *Optional*    | Used when [Connection.platform](#connection) is `tlspdc`, `firefly`, or `ngts`.<br/>Defines path to PEM-formatted trust bundle that contains the root (and optionally intermediate certificates) to use to trust the TLS connection. If omitted, will attempt to use operating system trusted CAs.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| url         | string                             | ***Required***                   | *Optional*                | ***Required***            | *Optional*     | URL of the platform to connect to.<br/>If url string does not include `https://`, it will be added automatically.<br/>For connection to CyberArk Certificate Manager, Self-Hosted, `url` must include the full API path (for example `https://cmsh.company.com/vedsdk/` <br/> For CyberArk Certificate Manager, SaaS you can specify the url using this parameter. Currently we support the following regions:<br/>- `https://api.venafi.cloud` (US region).<br/>- `https://api.venafi.eu` (EU region).<br/>- `https://api.au.venafi.cloud` (AU region).<br/> - `https://api.uk.venafi.cloud` (UK region).<br/> - `https://api.sg.venafi.cloud` (SG region).<br/> - `https://api.ca.venafi.cloud` (CA region).<br/> If not set, will default to US region.<br/>For Palo Alto NGTS, you can optionally specify the url. If not set, will default to `https://api.strata.paloaltonetworks.com/ngts/`. |
+
+### Credentials
+
+| Field        | Type                                         | Certificate Manager, Self-Hosted | Certificate Manager, SaaS | Workload Identity Manager | NGTS          | Description                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+|--------------|----------------------------------------------|----------------------------------|---------------------------|---------------------------|---------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| accessToken  | string                                       | *Optional*                       | *Optional*                | n/a                       | *Optional*    | Used when [Connection.platform](#connection) is `tlspdc` for authenticating to the REST API.<br/>If omitted, invalid, or expired, vcert will attempt to use the [Credential.p12Task](#credentials) or [Credential.refreshToken](#credentials) to get a valid accessToken.<br/>Upon successful refresh, this value will be overwritten with the new valid accessToken.<br/><br/>Used when [Connection.platform](#connection) is `ngts` for OAuth-based authentication to the REST API. If omitted, invalid, or expired, vcert will automatically obtain a new accessToken using the [Credential.clientId](#credentials), [Credential.clientSecret](#credentials), [Credential.scope](#credentials), and [Credential.tokenURL](#credentials).<br/>Upon successful refresh, this value will be overwritten with the new valid accessToken.<br/><br/>**Note:** NGTS does NOT support refresh tokens - it uses OAuth2 client credentials flow for token renewal. |
+| apiKey       | string                                       | n/a                              | *Optional*                | n/a                       | n/a           | Used when [Connection.platform](#connection) is `tlspc` for authenticating to the REST API.                                                                                                                                                                                                                                                                                                                                                       |
+| clientId     | string                                       | *Optional*                       | n/a                       | *Optional*                | ***Required*** | Used when [Connection.platform](#connection) is `tlspc` to map to the API integration to be used. If omitted, uses `vcert-sdk` as default.<br/><br/>Used when [Connection.platform](#connection) is `firefly` along with `clientSecret` to follow a `credentials authorization flow`.<br/><br/>Used when [Connection.platform](#connection) is `ngts` for OAuth2 client credentials authentication. Required along with [Credential.clientSecret](#credentials), [Credential.scope](#credentials), and [Credential.tokenURL](#credentials) to obtain access tokens.                                                                                                                                                                             |
+| clientSecret | string                                       | n/a                              | n/a                       | *Optional*                | ***Required*** | Used when [Connection.platform](#connection) is `firefly` along with `clientId` to follow a `credentials authorization flow` to get an authorization token from the OAuth2 Provider.<br/><br/>Used when [Connection.platform](#connection) is `ngts` for OAuth2 client credentials authentication. Required along with [Credential.clientId](#credentials), [Credential.scope](#credentials), and [Credential.tokenURL](#credentials) to obtain access tokens.                                                                                                                                                                                                                                                              |
+| externalJWT  | string                                       | n/a                              | *Optional*                | n/a                       | n/a           | Used when [Connection.platform](#connection) is `tlspc` along with `tokenURL` to request a new authorization token from a service account.                                                                                                                                                                                                                                                                                                        |
+| idP          | [IdentityProvider](#identityprovider) object | n/a                              | n/a                       | ***Required***            | n/a           | Used when [Connection.platform](#connection) is `firefly` to request a new authorization token to the OAuth2 Provider.                                                                                                                                                                                                                                                                                                                            |
+| p12Task      | string                                       | *Optional*                       | n/a                       | n/a                       | n/a           | Used when [Connection.platform](#connection) is `tlspdc` to reference a configured [CertificateTasks.name](#certificatetask) to be used for certificate authentication.<br/>Will be used to get a new accessToken when `accessToken` is missing, invalid, or expired.<br/>Referenced `certificateTask` must have an installation of type `pkcs12`.                                                                                                |
+| password     | string                                       | n/a                              | n/a                       | *Optional*                | n/a           | Used when [Connection.platform](#connection) is `firefly` along with `user` to follow a `password authorization flow` to request a new authorization token from the OAuth2 Provider.                                                                                                                                                                                                                                                              |
+| refreshToken | string                                       | *Optional*                       | n/a                       | n/a                       | n/a           | Used when [Connection.platform](#connection) is `tlspdc` to refresh the `accessToken` if it is missing, invalid, or expired.<br/>If omitted, the `accessToken` will not be refreshed when it expires.<br/>When a refresh token is used, a new accessToken *and* refreshToken are issued and the previous refreshToken is then invalid (one-time use only).<br/>vCert will attempt to update the refreshToken and accessToken fields upon refresh. |
+| scope        | string                                       | *Optional*                       | n/a                       | *Optional*                | ***Required*** | Used when [Connection.platform](#connection) is `tlspdc` to determine the scope of the token when refreshing the access token, or when getting a new grant using a `pkcs12` certificate. Defaults to `certificate:manage` if omitted.<br/><br/>Used when [Connection.platform](#connection) is `firefly` to determine the scope of the token to be requested to the OAuth2 provider. Some providers may have default scopes while others dont.<br/><br/>Used when [Connection.platform](#connection) is `ngts` for OAuth2 client credentials authentication. Must be in the format `tsg_id:<TSG_ID>` where TSG_ID is a 10-digit integer. This can be any TSG the service account is authorized for, including a sub-TSG — not just the TSG it was originally created under. Required along with [Credential.clientId](#credentials), [Credential.clientSecret](#credentials), and [Credential.tokenURL](#credentials) to obtain access tokens.    |
+| tokenURL     | string                                       | n/a                              | *Optional*                | n/a                       | ***Required*** | Used when [Connection.platform](#connection) is `tlspc` along with `externalJWT` to request a new authorization token from a service account.<br/><br/>Used when [Connection.platform](#connection) is `ngts` for OAuth2 client credentials authentication. Specifies the OAuth2 token endpoint URL. Required along with [Credential.clientId](#credentials), [Credential.clientSecret](#credentials), and [Credential.scope](#credentials) to obtain access tokens.                                                                                                                                                                                                                                                                                                     |
+| user         | string                                       | n/a                              | n/a                       | *Optional*                | n/a           | Used when [Connection.platform](#connection) is `firefly` along with `password` to follow a `password authorization flow` to request a new authorization token from the OAuth2 Provider.                                                                                                                                                                                                                                                          |
+
+### IdentityProvider
+
+| Field    | Type   | Certificate Manager, Self-Hosted | Certificate Manager, SaaS | Workload Identity Manager | NGTS | Description                                                                                                                                                                              |
+|----------|--------|----------------------------------|---------------------------|---------------------------|------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| audience | string | n/a                              | n/a                       | *Optional*                | n/a  | Used when [Connection.platform](#connection) is `firefly` to map the audience for the authorization token request from the OAuth2 Provider. Not all OAuth2 providers require this value. |
+| tokenURL | string |                                  | n/a                       | ***Required***            | n/a  | Used when [Connection.platform](#connection) is `firefly` to request a new authorization token to the OAuth2 Provider.                                                                   |
+
+### CertificateTask
+
+| Field         | Type                                           | Required       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+|---------------|------------------------------------------------|----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| installations | array of [Installation](#installation) objects | ***Required*** | Specifies one or more locations in which format and where the certificate requested will be stored.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| name          | string                                         | ***Required*** | The name of the certificate task within the playbook. Used in output messages to distinguish tasks when multiple certificate tasks are defined.<br/>Also, referred to by [Credential.p12Task](#credentials) when specifying a certificate to use to refresh [Credential.accessToken](#credentials).<br/>If more than one [CertificateTask](#certificatetask) exists, each name must be unique.                                                                                                                              |
+| renewBefore   | string                                         | *Optional*     | Configure auto-renewal threshold for certificates. Either by days, hours, or percent remaining of certificate lifetime.<br/>For example, `30d` renews certificate 30 days before expiration, `10h` renews the certificate 10 hours before expiration, or `15%` renews when 15% of the lifetime is remaining.<br/>Use `0` or `disabled` to disable auto-renew.<br/>Default is `10%`.                                                                                                                                         |
+| request       | [Request](#request) object                     | ***Required*** | The [Request](#request) object specifies the details about the certificate to be requested such as CommonName, SANs, etc.                                                                                                                                                                                                                                                                                                                                                                                                   |
+| setEnvVars    | array of strings                               | *Optional*     | Specify details about the certificate to be set as environment variables before the [Installation.afterInstallAction](#installation) is executed.<br/>Supported options are `thumbprint`, `serial`, and `base64` (which sets the entire base64 of the certificate retrieved as an environment variable).<br/>Environment variables will be named `VCERT_TASKNAME_THUMBPRINT`, `VCERT_TASKNAME_SERIAL`, or `VCERT_TASKNAME_BASE64` accordingly, where `TASKNAME` is the uppercased [CertificateTask.name](#certificatetask). |
+
+### Installation
+
+| Field               | Type    | Format<br/>PEM | Format<br/>JKS | Format<br/>PKCS12 | Format<br/>CAPI  | Description                                                                                                                                                                                                                                                        | 
+|---------------------|---------|----------------|----------------|-------------------|------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| afterInstallAction  | string  | *Optional*     | *Optional*     | *Optional*        | *Optional*       | Execute this command after this installation is performed (both enrollment and renewal).<br/>On *nix, this uses `/bin/sh -c '<afterInstallAction>'`.<br/>On Windows, this uses `powershell.exe '<afterInstallAction>'`.                                            |
+| backupFiles         | boolean | *Optional*     | *Optional*     | *Optional*        | n/a              | When `true`, backup existing certificate files before replacing during a renewal operation.<br/>Defaults to `false`.                                                                                                                                               |
+| capiFriendlyName    | string  | n/a            | n/a            | n/a               | *Optional*       | Specifies the friendly name to be used for the installed certificate in Windows CAPI store.<br/>If not set, the certificate Common Name will be used instead.<br/>**STRONGLY RECOMMENDED** to set this field as it will be made ***Required*** in a future release |
+| capiIsNonExportable | boolean | n/a            | n/a            | n/a               | *Optional*       | When `true`, private key will be flagged as 'Non-Exportable' when stored in Windows CAPI store.<br/>Defaults to `false`.                                                                                                                                           |
+| capiLocation        | string  | n/a            | n/a            | n/a               | ***Required***   | Specifies the Windows CAPI store to place the installed certificate. Typically `"LocalMachine\My"` or `"CurrentUser\My"`.<br/>**NOTE:** If the location is contained within `"`, the backslash `\` must be properly escaped (i.e. `"LocalMachine\\My"`).           |
+| chainFile           | string  | ***Required*** | n/a            | n/a               | n/a              | Specifies the file path and name for the chain PEM bundle (Example `/etc/ssl/certs/myChain.cer`).                                                                                                                                                                  |
+| file                | string  | ***Required*** | ***Required*** | ***Required***    | n/a              | Specifies the file path and name for the certificate file (PEM) or PKCS#12 / JKS bundle.<br/>Example `/etc/ssl/certs/myPEMfile.cer`, `/etc/ssl/certs/myPKCS12.p12`, or `/etc/ssl/certs/myJKS.jks`.                                                                 |
+| format              | string  | ***Required*** | ***Required*** | ***Required***    | ***Required***   | Specifies the format type for the installed certificate.<br/>Valid types are `PKCS12`, `PEM`, `JKS`, and `CAPI`.                                                                                                                                                   |
+| jksAlias            | string  | n/a            | ***Required*** | n/a               | n/a              | Specifies the certificate alias value within the Java Keystore.                                                                                                                                                                                                    |
+| jksPassword         | string  | n/a            | ***Required*** | n/a               | n/a              | Specifies the password for the Java Keystore.                                                                                                                                                                                                                      |
+| keyFile             | string  | ***Required*** | n/a            | n/a               | n/a              | Specifies the file path and name for the private key PEM file (Example `/etc/ssl/certs/myKey.key`).                                                                                                                                                                |
+| keyPassword         | string  | *Optional*     | n/a            | n/a               | n/a              | Specifies the password to encrypt the private key for PEM type. If not specified, the private key will be stored in an unencrypted PEM format.                                                                                                                     |
+| useLegacyP12        | boolean | n/a            | n/a            | *Optional*        | *Optional*       | Default is false. Instructs vcert to use legacy encryption (3DES-SHA1 instead of AES-256-CBC) when encoding the keystore to maintain compatibility with Windows 2016 and earlier & OpenSSL versions 1.1/1.2. This is required for CAPI installs on Windows 2016.   |
+| ~~location~~        | string  | n/a            | n/a            | n/a               | ***DEPRECATED*** | Use `capiLocation` instead.                                                                                                                                                                                                                                        |
+| p12Password         | string  | n/a            | n/a            | ***Required***    | n/a              | Specifies the password to encrypt the PKCS12 bundle.                                                                                                                                                                                                               |
+
+### Request
+
+| Field      | Type                                         | Required       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+|------------|----------------------------------------------|----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| appInfo    | string                                       | *Optional*     | - Sets the origin attribute on the certificate object in CyberArk Certificate Manager, Self-Hosted. Only valid when [Connection.platform](#connection) is `tpp`.                                                                                                                                                                                                                                                                                                                                                                |
+| cadn       | string                                       | *Optional*     | - Specify the DN path to the CA Template to use when requesting the certificate. (i.e. "\VED\Policy\CA Templates\internal-ca"). Only valid when [Connection.platform](#connection) is `tpp`.                                                                                                                                                                                                                                                                                                                                    |
+| chain      | string                                       | *Optional*     | - Determines the ordering of certificates within the returned chain. Valid options are `root-first`, `root-last`, or `ignore`. Defaults to `root-last`.                                                                                                                                                                                                                                                                                                                                                                         |
+| csr        | string                                       | *Optional*     | - Specifies where the CSR and PrivateKey are generated: use `local` to generate the CSR and PrivateKey locally, or `service` to have the PrivateKey and CSR generated by the specified [Connection.platform](#connection). Defaults to `local`.                                                                                                                                                                                                                                                                                 |
+| fields     | array of [CustomField](#customfield) objects | *Optional*     | - Sets the specified custom field on certificate object. Only valid when [Connection.platform](#connection) is `tpp`.                                                                                                                                                                                                                                                                                                                                                                                                           |
+| issuerHint | string                                       | *Optional*     | - Used only when [Request.validDays](#request) is specified to determine the correct Specific End Date attribute to set on the CyberArk Certificate Manager, Self-Hosted certificate object. Valid options are `DIGICERT`, `MICROSOFT`, `ENTRUST`, `ALL_ISSUERS`. If not defined, but `validDays` are set, the attribute 'Specific End Date' will be used. Only valid when [Connection.platform](#connection) is `tpp`.                                                                                                         |
+| keyCurve   | string                                       | ***Required*** | when [Request.keyType](#request) is `ECDSA`, `EC`, or `ECC`. Valid values are `P256`, `P384`, `P521`, `ED25519`.                                                                                                                                                                                                                                                                                                                                                                                                                |
+| keySize    | integer                                      | *Optional*     | - Specifies the key size when specified [Request.keyType](#request) is `RSA`. Supported values are `1024`, `2048`, `3072`, `4096`, and `8192`. Defaults to 2048.                                                                                                                                                                                                                                                                                                                                                                |
+| keyType    | string                                       | *Optional*     | - Specify the key type of the requested certificate. Valid options are `RSA`, `ECDSA`, `EC`, `ECC` and `ED25519`. Default is `RSA`.                                                                                                                                                                                                                                                                                                                                                                                             |
+| location   | [Location](#location) object                 | *Optional*     | - Use to provide the name/address of the compute instance and an identifier for the workload using the certificate. This results in a device (node) and application (workload) being associated with the certificate in the CyberArk Platform.<br/>Example: `node:workload`.                                                                                                                                                                                                                                                    |
+| nickname   | string                                       | *Optional*     | - Specify the certificate object name to be created in CyberArk Certificate Manager, Self-Hosted for the requested certificate. If not specified, CyberArk Certificate Manager, Self-Hosted will use the [Subject.commonName](#subject). Only valid when [Connection.platform](#connection) is `tpp`.                                                                                                                                                                                                                           |
+| pickupFirst| boolean                                      | *Optional*     | - When `true`, enables shared-certificate distribution ("pickup-first" mode). VCert queries the platform for an existing certificate matching the Common Name (or `pickupId`) before attempting a new enrollment. If the platform has a newer certificate than what is installed locally, it downloads and installs the certificate (and private key if service-generated/vaulted) without enrolling a new certificate. If the platform certificate is older, it safely refuses a downgrade and exits cleanly. If the thumbprint matches installed, it defers to the `renewBefore` window check. If no certificate exists on the platform, it falls back to initial enrollment. Supported on `tpp` and `ngts`. Defaults to `false`. |
+| pickupId   | string                                       | *Optional*     | - Platform-specific identifier override for `pickupFirst`. On `tpp`, specifies the certificate object DN (defaults to `<zone>\<commonName>`). On `ngts`, specifies a Certificate ID (UUID), Certificate Request ID, or SHA-1 fingerprint.                                                                                                                                                                                                                                                                                   |
+| sanDNS     | array of string                              | *Optional*     | - Specify one or more DNS SAN entries for the requested certificate.                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| sanEmail   | array of string                              | *Optional*     | - Specify one or more Email SAN entries for the requested certificate.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| sanIP      | array of string                              | *Optional*     | - Specify one or more IP SAN entries for the requested certificate.                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| sanUPN     | array of string                              | *Optional*     | - Specify one or more UPN SAN entries for the requested certificate.                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| sanURI     | array of string                              | *Optional*     | - Specify one or more URI SAN entries for the requested certificate.                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| subject    | [Subject](#subject) object                   | ***Required*** | - defines the [Subject](#subject) information for the requested certificate.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| validDays  | string                                       | *Optional*     | - Specify the number of days the certificate should be valid for. Only supported by specific CAs, and only if [Connection.platform](#connection) is `tpp`. The number of days can be combined with an "issuer hint" to correctly set the right parameter for the desired CA. For example, `"30#m"` will specify a 30-day certificate from a Microsoft issuer. Valid hints are `m` for Microsoft, `d` for Digicert, `e` for Entrust. If an issuer hint is not specified, the generic attribute 'Specific End Date' will be used. |
+| zone       | string                                       | ***Required*** | - Specifies the zone/template to use for the certificate request. The format varies by platform:<br/>- **CyberArk Certificate Manager, Self-Hosted**: Policy Folder path, excluding the "\VED\Policy" prefix (e.g., `Certificates\vCert`).<br/>- **CyberArk Certificate Manager, SaaS**: Application name and Issuing Template in the format `Application Name\Issuing Template` (e.g., `My App\SSL Plus`).<br/>- **CyberArk Workload Identity Manager**: Zone name.<br/>**NOTE:** if the zone is not contained within `"`, the backslash `\` must be properly escaped (i.e. `Certificates\\vCert`).<br/>- **Palo Alto Networks NGTS**: Certificate Issuing Template name (e.g., `Enterprise-CIT`).                                                                                                                         |
+
+### CustomField
+> Custom Fields are only supported by _CyberArk Certificate Manager, Self-Hosted_ platform
+
+| Field | Type   | Required       | Description                                                                                                                                           |
+|-------|--------|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| name  | string | ***Required*** | Adds a custom-field entry with name to the certificate object. The custom field must already be defined in CyberArk Certificate Manager, Self-Hosted. |
+| value | string | ***Required*** | Specifies the custom-field value to the certificate object.                                                                                           |
+
+
+### Location
+
+| Field      | Type    | Required       | Description                                                                                                                                                                                                                                                                             |
+|------------|---------|----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| instance   | string  | ***Required*** | Specifies the name of the installed node (typically the hostname).                                                                                                                                                                                                                      |
+| replace    | boolean | *Optional*     | Replace the current object with new information. Defaults to `false`.                                                                                                                                                                                                                   |
+| tlsAddress | string  | ***Required*** | Specifies the IP address or hostname and port where the certificate can be validated by the CyberArk Platform. <br/>Example: `192.168.100.23:443`.                                                                                                                                      |
+| workload   | string  | *Optional*     | Use to provide an identifier for the workload using the certificate. Example: `workload`.                                                                                                                                                                                               |
+| zone       | string  | *Optional*     | Use to provide a different policy folder for the device object to be created in, when platform is CyberArk Certificate Manager, Self-Hosted. If excluded, the device object is created in the same policy folder as the certificate. Example: `Installations\Agentless\Datacenters\PHX` |
+
+### Subject
+
+| Field        | Type            | Required       | Description                                                                           |
+|--------------|-----------------|----------------|---------------------------------------------------------------------------------------|
+| commonName   | string          | ***Required*** | Specifies the CN= (CommonName) attribute of the requested certificate.                |
+| country      | string          | *Optional*     | Specifies the C= (Country) attribute of the requested certificate.                    |
+| locality     | string          | *Optional*     | Specifies the L= (City) attribute of the requested certificate.                       |
+| organization | string          | *Optional*     | Specifies the O= (Organization) attribute of the requested certificate.               |
+| orgUnits     | array of string | *Optional*     | Specifies one or more OU= (Organization Unit) attribute of the requested certificate. |
+| state        | string          | *Optional*     | Specifies the S= (State) attribute of the requested certificate.                      |
+
+## Shared-Certificate Distribution (`pickupFirst` Mode)
+
+In clustered or load-balanced environments (e.g. Node 1 and Node 2 serving the same hostname), having every node run standard enrollment results in duplicate certificate requests, extra CA costs, and out-of-sync private keys.
+
+Configuring `pickupFirst: true` enables automatic multi-node convergence using the exact same command on all nodes:
+
+```bash
+vcert run -f playbook.yaml
+```
+
+### Why It Works with the Same Command
+
+That is the entire purpose of `pickupFirst: true`. You do not need special flags, separate configurations, or custom wrapper scripts for different nodes.
+
+The playbook file is identical on every machine:
+
+```yaml
+certificateTasks:
+  - name: shared-service-cert
+    renewBefore: 1d
+    request:
+      csr: service
+      pickupFirst: true            # <-- Enables automatic convergence
+      zone: 'Private 5 days'
+      subject:
+        commonName: 'shared.example.com'
+    installations:
+      - format: PEM
+        file: /etc/ssl/certs/app.crt
+        keyFile: /etc/ssl/private/app.key
+        chainFile: /etc/ssl/certs/chain.crt
+        afterInstallAction: "systemctl reload nginx"
+```
+
+### How the Nodes Coordinate Automatically
+
+```
+                   vcert run -f playbook.yaml
+                              │
+                 Does cert exist on Platform?
+                             ╱ ╲
+                       YES ╱     ╲ NO
+                         ╱         ╲
+      Is Platform newer             Node 1 (First to run):
+     than installed cert?           - Falls through & Enrolls cert
+            ╱ ╲                     - Key generated on Platform (csr: service)
+      YES ╱     ╲ NO (Match)        - Installs cert + key locally
+        ╱         ╲
+ Node 2 (Follower):  Both Nodes (Cron / Next run):
+ - Downloads cert    - Thumbprints match
+   + key from DEK    - Checks renewBefore window
+ - Installs locally  - If healthy: Exits in < 1s with NO action
+ - ZERO enrollment
+```
+
+1. **Whichever node runs first (e.g. Node 1)**:
+   - Queries the platform for `shared.example.com`.
+   - Finds nothing &rarr; automatically falls through to enroll it.
+   - The platform generates the private key (`csr: service`) and issues the certificate.
+   - Node 1 installs the certificate and private key.
+
+2. **The other node (Node 2)**:
+   - Runs the identical command: `vcert run -f playbook.yaml`.
+   - Queries the platform for `shared.example.com`.
+   - Finds the certificate Node 1 enrolled.
+   - Since Node 2 has no certificate installed yet, it downloads the certificate and the server-side private key (via DEK decryption) and installs them.
+   - Zero enrollment requests are created.
+
+3. **Subsequent runs on both nodes (e.g. daily cron)**:
+   - Both nodes run `vcert run -f playbook.yaml`.
+   - Both inspect their local certificate: the thumbprint matches the platform.
+   - Both check `renewBefore`: if still valid, both exit in <1 second with *"certificate in good health. No actions needed"*.
+   - When the renewal window eventually hits, whichever node runs first renews it; the other node picks up the renewed certificate on its next run.
+
+### Decision Flow Summary
+1. **Match**: If the locally installed certificate's SHA-1 thumbprint matches the platform certificate, VCert defers to the standard `renewBefore` window check.
+2. **Platform is Newer**: If the platform has a newer certificate than what is installed locally (or no certificate is installed), VCert downloads the certificate + private key + chain, installs them locally, runs `afterInstallAction`, and skips enrollment.
+3. **Platform is Older**: If the platform certificate has an older expiration date than what is installed locally, VCert logs a warning, refuses to downgrade, and exits cleanly.
+4. **Not Found**: If no certificate is found on the platform, VCert falls through to standard enrollment.
+
