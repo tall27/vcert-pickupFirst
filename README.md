@@ -197,6 +197,7 @@ go test -v ./pkg/playbook/app/vcertutil -run Test
 ---
 
 ## 📚 Additional Resources
+* **NGTS Credential Configuration & Run Guide**: [`CREDENTIAL_MANAGEMENT.md`](CREDENTIAL_MANAGEMENT.md)
 * **Full Playbook Reference**: [`README-PLAYBOOK.md`](README-PLAYBOOK.md)
 * **Upstream VCert Project**: [github.com/Venafi/vcert](https://github.com/Venafi/vcert)
 
