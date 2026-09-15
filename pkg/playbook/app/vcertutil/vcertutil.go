@@ -547,10 +547,10 @@ func findNewestNGTSCert(certs []ngts.Certificate) (*ngts.Certificate, time.Time)
 	var newest *ngts.Certificate
 	var newestEnd time.Time
 
-	// First pass: try to find the newest non-retired certificate
+	// Find the newest active, non-retired, non-revoked certificate
 	for i := range certs {
 		c := &certs[i]
-		if strings.EqualFold(c.CertificateStatus, "RETIRED") {
+		if c.IsRetiredOrRevoked() {
 			continue
 		}
 		t, err := time.Parse(time.RFC3339, c.ValidityEnd)
@@ -561,23 +561,6 @@ func findNewestNGTSCert(certs []ngts.Certificate) (*ngts.Certificate, time.Time)
 			if newest == nil || t.After(newestEnd) {
 				newest = c
 				newestEnd = t
-			}
-		}
-	}
-
-	// Second pass: if all were retired or no active found, take the newest overall
-	if newest == nil {
-		for i := range certs {
-			c := &certs[i]
-			t, err := time.Parse(time.RFC3339, c.ValidityEnd)
-			if err != nil {
-				t, err = time.Parse(time.RFC3339Nano, c.ValidityEnd)
-			}
-			if err == nil {
-				if newest == nil || t.After(newestEnd) {
-					newest = c
-					newestEnd = t
-				}
 			}
 		}
 	}
@@ -658,10 +641,10 @@ func findNewestCloudCert(certs []cloud.Certificate) (*cloud.Certificate, time.Ti
 	var newest *cloud.Certificate
 	var newestEnd time.Time
 
-	// First pass: try to find the newest non-retired certificate
+	// Find the newest active, non-retired, non-revoked certificate
 	for i := range certs {
 		c := &certs[i]
-		if strings.EqualFold(c.CertificateStatus, "RETIRED") {
+		if c.IsRetiredOrRevoked() {
 			continue
 		}
 		t, err := time.Parse(time.RFC3339, c.ValidityEnd)
@@ -672,23 +655,6 @@ func findNewestCloudCert(certs []cloud.Certificate) (*cloud.Certificate, time.Ti
 			if newest == nil || t.After(newestEnd) {
 				newest = c
 				newestEnd = t
-			}
-		}
-	}
-
-	// Second pass: if all were retired or no active found, take the newest overall
-	if newest == nil {
-		for i := range certs {
-			c := &certs[i]
-			t, err := time.Parse(time.RFC3339, c.ValidityEnd)
-			if err != nil {
-				t, err = time.Parse(time.RFC3339Nano, c.ValidityEnd)
-			}
-			if err == nil {
-				if newest == nil || t.After(newestEnd) {
-					newest = c
-					newestEnd = t
-				}
 			}
 		}
 	}

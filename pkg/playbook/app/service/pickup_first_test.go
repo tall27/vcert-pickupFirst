@@ -137,3 +137,41 @@ func TestFirstInstalledCertInfo_MissingFile(t *testing.T) {
 	assert.False(t, ok)
 	assert.Empty(t, thumbprint)
 }
+
+func TestKeyMatchesCert(t *testing.T) {
+	// Generate key 1 and cert 1
+	key1, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	key1Der := x509.MarshalPKCS1PrivateKey(key1)
+	key1Pem := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: key1Der})
+
+	// Generate key 2 (different key)
+	key2, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	key2Der := x509.MarshalPKCS1PrivateKey(key2)
+	key2Pem := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: key2Der})
+
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName: "app.example.com",
+		},
+		NotBefore: time.Now().Add(-1 * time.Hour),
+		NotAfter:  time.Now().Add(24 * time.Hour),
+	}
+
+	certDer, err := x509.CreateCertificate(rand.Reader, &template, &template, &key1.PublicKey, key1)
+	require.NoError(t, err)
+	certPem := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDer}))
+
+	// 1. Matching key should return true
+	assert.True(t, keyMatchesCert(certPem, key1Pem, ""))
+
+	// 2. Mismatched key (different key) should return false
+	assert.False(t, keyMatchesCert(certPem, key2Pem, ""))
+
+	// 3. Empty inputs should return false
+	assert.False(t, keyMatchesCert("", key1Pem, ""))
+	assert.False(t, keyMatchesCert(certPem, nil, ""))
+	assert.False(t, keyMatchesCert(certPem, []byte("invalid-key-data"), ""))
+}

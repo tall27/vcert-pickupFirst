@@ -62,7 +62,7 @@ func TestFindNewestNGTSCert(t *testing.T) {
 	parsedT2, _ := time.Parse(time.RFC3339, t2)
 	assert.Equal(t, parsedT2.Unix(), bestEnd.Unix())
 
-	// If only retired certs exist, should pick newest overall
+	// If only retired certs exist, should return nil (no active cert to pickup)
 	onlyRetired := []ngts.Certificate{
 		{
 			Id:                "cert-r1",
@@ -70,16 +70,13 @@ func TestFindNewestNGTSCert(t *testing.T) {
 			CertificateStatus: "RETIRED",
 		},
 		{
-			Id:                "cert-r2",
-			ValidityEnd:       t3,
-			CertificateStatus: "RETIRED",
+			Id:                  "cert-r2",
+			ValidityEnd:         t3,
+			CertificateStatuses: []string{"RETIRED"},
 		},
 	}
-	bestR, bestREnd := findNewestNGTSCert(onlyRetired)
-	assert.NotNil(t, bestR)
-	assert.Equal(t, "cert-r2", bestR.Id)
-	parsedT3, _ := time.Parse(time.RFC3339, t3)
-	assert.Equal(t, parsedT3.Unix(), bestREnd.Unix())
+	bestR, _ := findNewestNGTSCert(onlyRetired)
+	assert.Nil(t, bestR)
 }
 
 func TestFindNewestCloudCert(t *testing.T) {
@@ -95,20 +92,20 @@ func TestFindNewestCloudCert(t *testing.T) {
 			CertificateStatus: "ACTIVE",
 		},
 		{
-			Id:                "cloud-2",
-			Fingerprint:       "FP2",
-			ValidityEnd:       t2,
-			CertificateStatus: "ACTIVE",
+			Id:                  "cloud-2",
+			Fingerprint:         "FP2",
+			ValidityEnd:         t2,
+			CertificateStatuses: []string{"ACTIVE"},
 		},
 		{
-			Id:                "cloud-retired",
-			Fingerprint:       "FP3",
-			ValidityEnd:       t3,
-			CertificateStatus: "RETIRED",
+			Id:                  "cloud-retired",
+			Fingerprint:         "FP3",
+			ValidityEnd:         t3,
+			CertificateStatuses: []string{"RETIRED"},
 		},
 	}
 
-	// Should pick cloud-2 because cloud-retired is retired even though t3 > t2
+	// Should pick cloud-2 because cloud-retired has CertificateStatuses=["RETIRED"]
 	best, bestEnd := findNewestCloudCert(certs)
 	assert.NotNil(t, best)
 	assert.Equal(t, "cloud-2", best.Id)
@@ -116,7 +113,7 @@ func TestFindNewestCloudCert(t *testing.T) {
 	parsedT2, _ := time.Parse(time.RFC3339, t2)
 	assert.Equal(t, parsedT2.Unix(), bestEnd.Unix())
 
-	// If only retired certs exist, should pick newest overall
+	// If only retired certs exist, should return nil (no active cert to pickup)
 	onlyRetired := []cloud.Certificate{
 		{
 			Id:                "cloud-r1",
@@ -124,16 +121,13 @@ func TestFindNewestCloudCert(t *testing.T) {
 			CertificateStatus: "RETIRED",
 		},
 		{
-			Id:                "cloud-r2",
-			ValidityEnd:       t3,
-			CertificateStatus: "RETIRED",
+			Id:                  "cloud-r2",
+			ValidityEnd:         t3,
+			CertificateStatuses: []string{"RETIRED"},
 		},
 	}
-	bestR, bestREnd := findNewestCloudCert(onlyRetired)
-	assert.NotNil(t, bestR)
-	assert.Equal(t, "cloud-r2", bestR.Id)
-	parsedT3, _ := time.Parse(time.RFC3339, t3)
-	assert.Equal(t, parsedT3.Unix(), bestREnd.Unix())
+	bestR, _ := findNewestCloudCert(onlyRetired)
+	assert.Nil(t, bestR)
 }
 
 func TestLocateLatestCN_UnsupportedPlatform(t *testing.T) {

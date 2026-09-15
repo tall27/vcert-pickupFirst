@@ -18,6 +18,7 @@ package service
 
 import (
 	"crypto/sha1"
+	"crypto/tls"
 	"encoding/hex"
 	"os"
 	"strings"
@@ -116,14 +117,18 @@ func pickupFirstAttempt(config domain.Config, task domain.CertificateTask) (hand
 		for _, inst := range task.Installations {
 			if inst.KeyFile != "" {
 				if keyData, err := os.ReadFile(inst.KeyFile); err == nil && len(keyData) > 0 {
-					pcc.PrivateKey = string(keyData)
-					zap.L().Info("pickupFirst: attached existing private key from disk", zap.String("keyFile", inst.KeyFile))
-					break
+					if keyMatchesCert(pcc.Certificate, keyData, task.Request.KeyPassword) {
+						pcc.PrivateKey = string(keyData)
+						zap.L().Info("pickupFirst: attached matching existing private key from disk", zap.String("keyFile", inst.KeyFile))
+						break
+					} else {
+						zap.L().Warn("pickupFirst: private key on disk does not match platform certificate public key; skipping candidate", zap.String("keyFile", inst.KeyFile))
+					}
 				}
 			}
 		}
 		if pcc.PrivateKey == "" {
-			zap.L().Info("pickupFirst: no private key on platform or local disk; falling through to enroll")
+			zap.L().Info("pickupFirst: no matching private key available on platform or local disk; falling through to enroll")
 			return false, nil
 		}
 	}
@@ -169,4 +174,25 @@ func firstInstalledCertInfo(installations []domain.Installation) (thumbprint str
 		return strings.ToUpper(hex.EncodeToString(sum[:])), cert.NotAfter, true
 	}
 	return "", time.Time{}, false
+}
+
+// keyMatchesCert verifies cryptographically that the private key matches the public key
+// of the given PEM certificate.
+func keyMatchesCert(certPEM string, keyData []byte, password string) bool {
+	if len(certPEM) == 0 || len(keyData) == 0 {
+		return false
+	}
+	// 1. Try directly with tls.X509KeyPair (for unencrypted PEM keys)
+	if _, err := tls.X509KeyPair([]byte(certPEM), keyData); err == nil {
+		return true
+	}
+	// 2. If password provided, attempt decryption first
+	if password != "" {
+		if decryptedKey, err := vcertutil.DecryptPrivateKey(string(keyData), password); err == nil {
+			if _, err := tls.X509KeyPair([]byte(certPEM), []byte(decryptedKey)); err == nil {
+				return true
+			}
+		}
+	}
+	return false
 }
