@@ -32,6 +32,12 @@ import (
 	"github.com/Venafi/vcert/v5/pkg/playbook/app/vcertutil"
 )
 
+var (
+	locateLatestCNFunc    = vcertutil.LocateLatestCN
+	pickupByLocatorFunc   = vcertutil.PickupCertificateByLocator
+	executeEnrollmentFunc = executeEnrollmentAndInstall
+)
+
 // pickupFirstAttempt implements pickup-first mode (request.pickupFirst=true).
 // Supported backends: TPP, NGTS, and CyberArk Certificate Manager, SaaS (VCP/Cloud). On other backends
 // (Firefly, etc.) the feature is a silent no-op and the standard playbook flow runs.
@@ -59,7 +65,7 @@ func pickupFirstAttempt(config domain.Config, task domain.CertificateTask) (hand
 
 	installedThumb, installedNotAfter, foundInstalled := firstInstalledCertInfo(task.Installations)
 
-	loc, err := vcertutil.LocateLatestCN(config, task.Request)
+	loc, err := locateLatestCNFunc(config, task.Request)
 	if err != nil {
 		if err == vcertutil.ErrLocateNotSupported {
 			zap.L().Info("pickupFirst: not supported on this platform; running standard playbook flow",
@@ -80,7 +86,7 @@ func pickupFirstAttempt(config domain.Config, task domain.CertificateTask) (hand
 			zap.L().Info("pickupFirst: installed certificate is not active on authoritative platform (retired/revoked); triggering authoritative replacement enrollment",
 				zap.String("installed.thumbprint", installedThumb),
 			)
-			return true, executeEnrollmentAndInstall(config, task)
+			return true, executeEnrollmentFunc(config, task)
 		}
 		zap.L().Info("pickupFirst: no matching cert on platform; falling through to enroll")
 		return false, nil
@@ -109,10 +115,10 @@ func pickupFirstAttempt(config domain.Config, task domain.CertificateTask) (hand
 	}
 
 	keyPassword := vcertutil.GeneratePassword()
-	pcc, certReq, err := vcertutil.PickupCertificateByLocator(config, task.Request, loc, keyPassword, true)
+	pcc, certReq, err := pickupByLocatorFunc(config, task.Request, loc, keyPassword, true)
 	if err != nil {
 		zap.L().Warn("pickupFirst: pickup with key failed", zap.Error(err))
-		pcc, certReq, err = vcertutil.PickupCertificateByLocator(config, task.Request, loc, "", false)
+		pcc, certReq, err = pickupByLocatorFunc(config, task.Request, loc, "", false)
 		if err != nil {
 			zap.L().Info("pickupFirst: cert-only pickup also failed; falling through to enroll", zap.Error(err))
 			return false, nil
@@ -142,7 +148,7 @@ func pickupFirstAttempt(config domain.Config, task domain.CertificateTask) (hand
 		}
 		if pcc.PrivateKey == "" {
 			zap.L().Info("pickupFirst: no matching private key available on platform or local disk; triggering replacement enrollment")
-			return true, executeEnrollmentAndInstall(config, task)
+			return true, executeEnrollmentFunc(config, task)
 		}
 	}
 	if certReq != nil {
