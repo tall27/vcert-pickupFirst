@@ -57,6 +57,8 @@ func pickupFirstAttempt(config domain.Config, task domain.CertificateTask) (hand
 		return false, nil
 	}
 
+	installedThumb, installedNotAfter, foundInstalled := firstInstalledCertInfo(task.Installations)
+
 	loc, err := vcertutil.LocateLatestCN(config, task.Request)
 	if err != nil {
 		if err == vcertutil.ErrLocateNotSupported {
@@ -68,11 +70,22 @@ func pickupFirstAttempt(config domain.Config, task domain.CertificateTask) (hand
 		return false, nil
 	}
 	if loc == nil || !loc.Found {
+		if foundInstalled {
+			// Contract 001 (NIST Central Authority Compliance):
+			// The host currently has a certificate installed on disk, but the authoritative central platform
+			// has zero active certificates for this CN (meaning all matching certs were RETIRED or REVOKED).
+			// The local certificate is deemed UNAUTHORIZED by the central platform authority.
+			// Rather than allowing the local filesystem expiration date to block renewal,
+			// trigger an authoritative replacement enrollment immediately (Zero-Touch!).
+			zap.L().Info("pickupFirst: installed certificate is not active on authoritative platform (retired/revoked); triggering authoritative replacement enrollment",
+				zap.String("installed.thumbprint", installedThumb),
+			)
+			return true, executeEnrollmentAndInstall(config, task)
+		}
 		zap.L().Info("pickupFirst: no matching cert on platform; falling through to enroll")
 		return false, nil
 	}
 
-	installedThumb, installedNotAfter, foundInstalled := firstInstalledCertInfo(task.Installations)
 	zap.L().Info("pickupFirst: located platform cert",
 		zap.String("platform.thumbprint", loc.Thumbprint),
 		zap.Time("platform.validTo", loc.ValidTo),
@@ -128,8 +141,8 @@ func pickupFirstAttempt(config domain.Config, task domain.CertificateTask) (hand
 			}
 		}
 		if pcc.PrivateKey == "" {
-			zap.L().Info("pickupFirst: no matching private key available on platform or local disk; falling through to enroll")
-			return false, nil
+			zap.L().Info("pickupFirst: no matching private key available on platform or local disk; triggering replacement enrollment")
+			return true, executeEnrollmentAndInstall(config, task)
 		}
 	}
 	if certReq != nil {

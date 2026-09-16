@@ -3,7 +3,7 @@
 This distribution package contains the updated **VCert CLI** with support for the **`pickupFirst`** playbook feature across both **Venafi TPP** and **Venafi NGTS (CyberArk Certificate Manager SaaS)**.
 
 Included in this package:
-1. **Pre-built Windows x64 binary**: `vcert.exe` (Version: `v5.13.11-pickupFirst`)
+1. **Pre-built Windows x64 binary**: `vcert.exe` (Version: `v5.13.12-pickupFirst`)
 2. **Complete Go source code**: Ready for audit and multi-platform compilation (`linux/amd64`, `linux/arm64`, `darwin/arm64`, etc.)
 3. **Interactive Guide**: `pickup_first_guide.html` (Open in any modern browser)
 4. **Configuration Examples**: `examples/playbook/ngts_pickup_first.yaml` and `README-PLAYBOOK.md`
@@ -16,7 +16,7 @@ To check the pre-built binary on Windows:
 
 ```powershell
 .\vcert.exe --version
-# Expected output: vcert.exe version v5.13.11-pickupFirst
+# Expected output: vcert.exe version v5.13.12-pickupFirst
 ```
 
 Display playbook run help:
@@ -38,28 +38,28 @@ The full Go source code is included so you can compile VCert for your specific t
 
 #### Linux (x86_64 / amd64)
 ```bash
-GOOS=linux GOARCH=amd64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.11-pickupFirst -s -w" -o vcert ./cmd/vcert
+GOOS=linux GOARCH=amd64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.12-pickupFirst -s -w" -o vcert ./cmd/vcert
 chmod +x vcert
 ./vcert --version
 ```
 
 #### Linux (ARM64)
 ```bash
-GOOS=linux GOARCH=arm64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.11-pickupFirst -s -w" -o vcert ./cmd/vcert
+GOOS=linux GOARCH=arm64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.12-pickupFirst -s -w" -o vcert ./cmd/vcert
 chmod +x vcert
 ./vcert --version
 ```
 
 #### macOS (Apple Silicon / M1 / M2 / M3)
 ```bash
-GOOS=darwin GOARCH=arm64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.11-pickupFirst -s -w" -o vcert ./cmd/vcert
+GOOS=darwin GOARCH=arm64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.12-pickupFirst -s -w" -o vcert ./cmd/vcert
 chmod +x vcert
 ./vcert --version
 ```
 
 #### macOS (Intel / amd64)
 ```bash
-GOOS=darwin GOARCH=amd64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.11-pickupFirst -s -w" -o vcert ./cmd/vcert
+GOOS=darwin GOARCH=amd64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.12-pickupFirst -s -w" -o vcert ./cmd/vcert
 chmod +x vcert
 ./vcert --version
 ```
@@ -67,7 +67,7 @@ chmod +x vcert
 #### Windows (x86_64)
 ```powershell
 $env:GOOS="windows"; $env:GOARCH="amd64"
-go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.11-pickupFirst -s -w" -o vcert.exe ./cmd/vcert
+go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.12-pickupFirst -s -w" -o vcert.exe ./cmd/vcert
 .\vcert.exe --version
 ```
 

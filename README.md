@@ -156,18 +156,18 @@ The following table summarizes the files added or modified to implement this fea
 
 ### 📦 Pre-compiled Downloads (All Platforms)
 
-Pre-compiled binary packages matching the official Venafi distribution structure are available on the [**GitHub Releases Page**](https://github.com/tall27/vcert-pickupFirst/releases/tag/v5.13.11-pickupFirst):
+Pre-compiled binary packages matching the official Venafi distribution structure are available on the [**GitHub Releases Page**](https://github.com/tall27/vcert-pickupFirst/releases/tag/v5.13.12-pickupFirst):
 
 | Platform | Architecture | Download Package |
 |---|---|---|
-| **Linux** | `x86_64` (amd64) | [`vcert_v5.13.11-pickupFirst_linux.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.11-pickupFirst/vcert_v5.13.11-pickupFirst_linux.zip) |
-| **Linux** | `ARM64` (aarch64) | [`vcert_v5.13.11-pickupFirst_linux_arm.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.11-pickupFirst/vcert_v5.13.11-pickupFirst_linux_arm.zip) |
-| **Linux** | `i386` (32-bit) | [`vcert_v5.13.11-pickupFirst_linux86.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.11-pickupFirst/vcert_v5.13.11-pickupFirst_linux86.zip) |
-| **macOS** | Apple Silicon (`arm64`) | [`vcert_v5.13.11-pickupFirst_darwin_arm.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.11-pickupFirst/vcert_v5.13.11-pickupFirst_darwin_arm.zip) |
-| **macOS** | Intel (`amd64`) | [`vcert_v5.13.11-pickupFirst_darwin.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.11-pickupFirst/vcert_v5.13.11-pickupFirst_darwin.zip) |
-| **Windows** | `x86_64` (amd64) | [`vcert_v5.13.11-pickupFirst_windows.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.11-pickupFirst/vcert_v5.13.11-pickupFirst_windows.zip) |
-| **Windows** | `i386` (32-bit) | [`vcert_v5.13.11-pickupFirst_windows86.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.11-pickupFirst/vcert_v5.13.11-pickupFirst_windows86.zip) |
-| **Windows** | `ARM64` | [`vcert_v5.13.11-pickupFirst_windows_arm.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.11-pickupFirst/vcert_v5.13.11-pickupFirst_windows_arm.zip) |
+| **Linux** | `x86_64` (amd64) | [`vcert_v5.13.12-pickupFirst_linux.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.12-pickupFirst/vcert_v5.13.12-pickupFirst_linux.zip) |
+| **Linux** | `ARM64` (aarch64) | [`vcert_v5.13.12-pickupFirst_linux_arm.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.12-pickupFirst/vcert_v5.13.12-pickupFirst_linux_arm.zip) |
+| **Linux** | `i386` (32-bit) | [`vcert_v5.13.12-pickupFirst_linux86.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.12-pickupFirst/vcert_v5.13.12-pickupFirst_linux86.zip) |
+| **macOS** | Apple Silicon (`arm64`) | [`vcert_v5.13.12-pickupFirst_darwin_arm.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.12-pickupFirst/vcert_v5.13.12-pickupFirst_darwin_arm.zip) |
+| **macOS** | Intel (`amd64`) | [`vcert_v5.13.12-pickupFirst_darwin.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.12-pickupFirst/vcert_v5.13.12-pickupFirst_darwin.zip) |
+| **Windows** | `x86_64` (amd64) | [`vcert_v5.13.12-pickupFirst_windows.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.12-pickupFirst/vcert_v5.13.12-pickupFirst_windows.zip) |
+| **Windows** | `i386` (32-bit) | [`vcert_v5.13.12-pickupFirst_windows86.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.12-pickupFirst/vcert_v5.13.12-pickupFirst_windows86.zip) |
+| **Windows** | `ARM64` | [`vcert_v5.13.12-pickupFirst_windows_arm.zip`](https://github.com/tall27/vcert-pickupFirst/releases/download/v5.13.12-pickupFirst/vcert_v5.13.12-pickupFirst_windows_arm.zip) |
 
 ---
 
@@ -175,19 +175,19 @@ Pre-compiled binary packages matching the official Venafi distribution structure
 
 #### Windows (`amd64`)
 ```powershell
-go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.11-pickupFirst -s -w" -o vcert.exe ./cmd/vcert
+go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.12-pickupFirst -s -w" -o vcert.exe ./cmd/vcert
 .\vcert.exe --version
 ```
 
 #### Linux (`amd64` / `arm64`)
 ```bash
-GOOS=linux GOARCH=amd64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.11-pickupFirst -s -w" -o vcert ./cmd/vcert
+GOOS=linux GOARCH=amd64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.12-pickupFirst -s -w" -o vcert ./cmd/vcert
 chmod +x vcert
 ```
 
 #### macOS (`arm64` / `amd64`)
 ```bash
-GOOS=darwin GOARCH=arm64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.11-pickupFirst -s -w" -o vcert ./cmd/vcert
+GOOS=darwin GOARCH=arm64 go build -ldflags "-X github.com/Venafi/vcert/v5.versionString=v5.13.12-pickupFirst -s -w" -o vcert ./cmd/vcert
 ```
 
 ### Running Unit Tests

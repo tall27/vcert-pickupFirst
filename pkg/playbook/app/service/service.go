@@ -67,6 +67,10 @@ func Execute(config domain.Config, task domain.CertificateTask) []error {
 	}
 	zap.L().Info("certificate needs action", zap.String("certificate", task.Request.Subject.CommonName))
 
+	return executeEnrollmentAndInstall(config, task)
+}
+
+func executeEnrollmentAndInstall(config domain.Config, task domain.CertificateTask) []error {
 	// Ensure there is a keyPassword in the request when origin is service
 	csrOrigin := certificate.ParseCSROrigin(task.Request.CsrOrigin)
 	if csrOrigin == certificate.ServiceGeneratedCSR {
@@ -113,7 +117,6 @@ func Execute(config domain.Config, task domain.CertificateTask) []error {
 		}
 	}
 	return errorList
-
 }
 
 func isCertificateChanged(config domain.Config, task domain.CertificateTask) (bool, error) {

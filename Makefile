@@ -1,7 +1,7 @@
 GOFLAGS ?= $(GOFLAGS:)
 LINTER_VERSION ?= v2.12.2
 
-VERSION ?= $(shell git describe --abbrev=0 --tags 2>/dev/null || echo "v5.13.11-pickupFirst")
+VERSION ?= $(shell git describe --abbrev=0 --tags 2>/dev/null || echo "v5.13.12-pickupFirst")
 
 ifdef BUILD_NUMBER
 VERSION := $(VERSION)+$(BUILD_NUMBER)

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>VCert pickupFirst Decision & Central Platform Authority Flow</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #ffffff;
+      color: #1f2937;
+      margin: 0;
+      padding: 40px;
+    }
+    .header {
+      max-width: 1200px;
+      margin: 0 auto 30px auto;
+      border-bottom: 2px solid #e5e7eb;
+      padding-bottom: 20px;
+    }
+    h1 {
+      font-size: 28px;
+      color: #111827;
+      margin: 0 0 8px 0;
+    }
+    p.desc {
+      font-size: 16px;
+      color: #4b5563;
+      margin: 0 0 12px 0;
+    }
+    .badge {
+      display: inline-block;
+      background: #eff6ff;
+      color: #1d4ed8;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid #bfdbfe;
+    }
+    .diagram-container {
+      max-width: 1400px;
+      margin: 0 auto;
+      background: #ffffff;
+      padding: 30px;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    }
+    .tldr-card {
+      max-width: 1200px;
+      margin: 30px auto 0 auto;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 20px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .tldr-card code {
+      background: #e5e7eb;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: Consolas, monospace;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="badge">NIST SP 800-52 / 800-57 / 800-185 Aligned</div>
+    <h1>VCert <code>pickupFirst</code> Decision & Central Platform Authority Flow</h1>
+    <p class="desc">
+      Comprehensive architectural decision tree for zero-touch cluster convergence and automated revocation/retirement reconciliation across CyberArk Certificate Manager SaaS, NGTS, and Venafi TPP.
+    </p>
+  </div>
+
+  <div class="diagram-container">
+    <pre class="mermaid">
+flowchart TD
+    Start(["vcert run -f playbook.yaml<br/>(Automated Daily Cron)"]) --> Q1{"pickupFirst: true<br/>in playbook request?"}
+
+    Q1 -- "No" --> Legacy["Legacy Standalone Flow:<br/>Inspect local disk NotAfter date<br/>via renewBefore threshold"]
+    Q1 -- "Yes" --> Q2{"Query CyberArk / Platform<br/>(LocateLatestCN):<br/>Active matching cert found?"}
+
+    %% Zero active certs branch (Contract 001 / Robert's case)
+    Q2 -- "No (0 Active Certs in CyberArk)" --> Q_Local{"Does local host already<br/>have a cert file installed<br/>on disk (/etc/...)?"}
+    Q_Local -- "No (Empty disk)" --> Day0["Day-0 Bootstrap:<br/>Enroll initial cert with CA,<br/>vault key & install locally"]
+    Q_Local -- "Yes (Local cert exists!)" --> NIST["Contract 001 (NIST Central Authority):<br/>Installed cert is UNAUTHORIZED<br/>(Retired or Revoked in CyberArk)"]
+    NIST --> AuthEnroll["Authoritative Re-Enrollment:<br/>Bypass local date check, enroll<br/>fresh cert + key from CA, update files<br/>& reload service (Zero-Touch!)"]
+
+    %% Active cert exists branch (Cluster convergence)
+    Q2 -- "Yes (Active Cert Exists)" --> Q_Match{"Does local installed<br/>thumbprint match<br/>platform thumbprint?"}
+    
+    Q_Match -- "Thumbprint Matches" --> Q_Renew{"Is local certificate<br/>within renewBefore<br/>window?"}
+    Q_Renew -- "No (Healthy)" --> FastExit["Healthy State:<br/>Exit in &lt;1s with 0 actions<br/>(Sub-second Idempotent Cron)"]
+    Q_Renew -- "Yes (Renewal Due)" --> StdRenew["Standard CA Renewal:<br/>Enroll renewed cert from CA,<br/>update files & reload service"]
+
+    Q_Match -- "Thumbprint Mismatches" --> Q_Newer{"Is platform cert<br/>NEWER than local?<br/>(ValidTo &gt; NotAfter)"}
+    Q_Newer -- "No (Platform Older)" --> RefuseDowngrade["Refuse Downgrade:<br/>Leave local files intact;<br/>log warning & exit clean"]
+    Q_Newer -- "Yes (Platform Newer)" --> Q_Key{"Is vaulted private key<br/>available from platform<br/>(csr: service / DEK)?"}
+
+    Q_Key -- "Yes (Vault key available)" --> Converge["Cluster Follower Convergence:<br/>Download cert + vaulted key,<br/>install locally (0 CA requests!)"]
+    Q_Key -- "No (Cert-only pickup)" --> Q_LocalKey{"Does local disk key<br/>match cert public key<br/>(tls.X509KeyPair)?"}
+
+    Q_LocalKey -- "Key Mismatch" --> MismatchSafeguard["Key Mismatch Safeguard:<br/>Reject wrong key from disk;<br/>fall through to enroll fresh pair"]
+    Q_LocalKey -- "Matches" --> AttachKey["Attach Local Key:<br/>Install cert + verified key,<br/>reload service"]
+
+    classDef violet fill:#ede9fe,stroke:#8b5cf6,stroke-width:2px,color:#4c1d95;
+    classDef orange fill:#ffedd5,stroke:#f97316,stroke-width:2px,color:#7c2d12;
+    classDef green fill:#dcfce7,stroke:#22c55e,stroke-width:2px,color:#14532d;
+    classDef blue fill:#dbeafe,stroke:#3b82f6,stroke-width:2px,color:#1e3a8a;
+    classDef red fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#7f1d1d;
+    classDef grey fill:#f3f4f6,stroke:#9ca3af,stroke-width:2px,color:#374151;
+
+    class Start violet;
+    class Q1,Q2,Q_Local,Q_Match,Q_Renew,Q_Newer,Q_Key,Q_LocalKey orange;
+    class Day0,AuthEnroll,FastExit,StdRenew,Converge,AttachKey green;
+    class NIST,MismatchSafeguard blue;
+    class RefuseDowngrade red;
+    class Legacy grey;
+    </pre>
+  </div>
+
+  <div class="tldr-card">
+    <strong>🎨 Interactive Whiteboard (.tldr file generated):</strong><br>
+    The native, fully editable tldraw whiteboard diagram has been saved to:
+    <code>C:\dev\vcert\vcert-pickupfirst-flow.tldr</code><br>
+    To open and freely edit, drag, and annotate the shapes:
+    <ol style="margin-top: 8px; padding-left: 20px;">
+      <li>Open <a href="https://www.tldraw.com/" target="_blank">https://www.tldraw.com/</a> in your browser.</li>
+      <li>Drag and drop <code>vcert-pickupfirst-flow.tldr</code> onto the canvas (or use <strong>Menu &rarr; File &rarr; Open</strong>).</li>
+    </ol>
+  </div>
+
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'neutral',
+      flowchart: { curve: 'basis' }
+    });
+  </script>
+</body>
+</html>
